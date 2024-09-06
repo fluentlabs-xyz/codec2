@@ -4,4 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+alloy-primitives = { version = "0.8.0", default-features = false }
 bytes = { version = "1.7.1", default-features = false }
+
+
+[dev-dependencies]
+hex = "0.4.3"
+hex-literal = "0.4.1"
