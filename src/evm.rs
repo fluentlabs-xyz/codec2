@@ -4,41 +4,32 @@ use crate::encoder2::{Alignment, Encoder, Endianness};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use bytes::BytesMut;
 
-// fn should return header size
+// Write bytes to the buffer
+// Returns the size of the header
+// To avoid resizing buffer, you can pre-allocate the buffer with the size of the header before calling this function
+// The header contains the offset and length of the data
+// The actual data is appended to the buffer, after the header
 pub fn write_bytes<A: Alignment, E: Endianness>(
     buffer: &mut BytesMut,
     offset: usize,
     bytes: &[u8],
 ) -> usize {
-    println!(
-        "buffer before (len = {:?}): {:?}",
-        buffer.clone().to_vec(),
-        buffer.len()
-    );
     let aligned_offset = A::align(offset);
-    let header_size = A::align(8); // 8 - 2 u32 values (offset and length)
-    println!("aligned_offset: {:?}", aligned_offset);
-    println!("header_size: {:?}", header_size);
+
+    // header = offset (u32) + data_length (u32)
+    // u32 + u32 = 8 bytes
+    let header_size = A::align(8);
 
     if buffer.len() < aligned_offset + header_size {
         buffer.resize(aligned_offset + header_size, 0);
     }
-    let data_offset = buffer.len();
-
-    // Calculate data_offset before resizing the buffer
-    // let data_offset = buffer.len();
-
-    // Calculate data_offset before resizing the buffer
-
-    println!("data_offset: {:?}", data_offset);
+    let header_offset = buffer.len();
 
     // Write header
-    // data_offset is the offset of the data in the buffer
     E::write_u32(
         &mut buffer[aligned_offset..aligned_offset + 4],
-        data_offset as u32,
+        header_offset as u32,
     );
-    // write data length
     E::write_u32(
         &mut buffer[aligned_offset + 4..aligned_offset + 8],
         bytes.len() as u32,
@@ -47,10 +38,9 @@ pub fn write_bytes<A: Alignment, E: Endianness>(
     // Append data
     buffer.extend_from_slice(bytes);
 
-    println!("buffer: {:?}", buffer.clone().to_vec());
-
     header_size
 }
+
 pub fn read_bytes<A: Alignment, E: Endianness>(
     bytes: &bytes::Bytes,
     field_offset: usize,

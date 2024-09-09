@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 alloy-primitives = { version = "0.8.0", default-features = false }
 bytes = { version = "1.7.1", default-features = false }
-
+hashbrown = { version = "0.14" }
 
 [dev-dependencies]
 hex = "0.4.3"
