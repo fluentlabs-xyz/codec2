@@ -116,6 +116,7 @@ impl<K: Default + Sized + Encoder<K> + Eq + Hash + Ord, V: Default + Sized + Enc
 }
 
 impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for HashSet<T> {
+    // length (4) + keys (8) (bytes)
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
 
     fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
@@ -131,18 +132,15 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
             self.len() as u32,
         );
 
-        if self.is_empty() {
-            return;
-        }
-
         // Make sure set is sorted
         let mut entries: Vec<_> = self.iter().collect();
         entries.sort();
 
         // Encode values
-        let mut value_buffer = BytesMut::with_capacity(T::HEADER_SIZE * self.len());
+        let mut value_buffer = BytesMut::zeroed(A::SIZE.max(T::HEADER_SIZE) * self.len());
         for (i, obj) in entries.iter().enumerate() {
-            obj.encode::<A, E>(&mut value_buffer, T::HEADER_SIZE * i);
+            let offset = A::SIZE.max(T::HEADER_SIZE) * i;
+            obj.encode::<A, E>(&mut value_buffer, offset);
         }
 
         // Write values
@@ -303,5 +301,36 @@ mod tests {
             &mut values2,
         );
         assert_eq!(values, values2);
+    }
+
+    #[test]
+    fn test_set() {
+        let values = HashSet::from([1, 2, 3]);
+        let mut buffer = BytesMut::new();
+        values.encode::<Align0, LittleEndian>(&mut buffer, 0);
+        let result = buffer.freeze();
+
+        println!("{}", hex::encode(&result));
+        let expected_encoded = "030000000c0000000c000000010000000200000003000000";
+        assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
+
+        let mut values2 = HashSet::new();
+        HashSet::<i32>::decode_body::<Align0, LittleEndian>(&result, 0, &mut values2);
+        assert_eq!(values, values2);
+    }
+
+    #[test]
+    fn test_set_is_sorted() {
+        let values1 = HashSet::from([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let mut buffer1 = BytesMut::new();
+        values1.encode::<Align4, LittleEndian>(&mut buffer1, 0);
+        let result1 = buffer1.freeze();
+
+        let values2 = HashSet::from([8, 3, 2, 4, 5, 9, 7, 1, 6]);
+        let mut buffer2 = BytesMut::new();
+        values2.encode::<Align4, LittleEndian>(&mut buffer2, 0);
+        let result2 = buffer2.freeze();
+
+        assert_eq!(result1, result2);
     }
 }
