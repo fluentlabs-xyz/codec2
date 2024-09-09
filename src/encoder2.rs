@@ -29,11 +29,19 @@ pub trait Encoder<T: Sized> {
     fn decode_body<A: Alignment, E: Endianness>(buf: &bytes::Bytes, offset: usize, result: &mut T);
 }
 
+pub struct Align0;
 pub struct Align1;
 
 pub struct Align2;
 pub struct Align4;
 pub struct Align8;
+
+impl Alignment for Align0 {
+    const SIZE: usize = 0;
+    fn align(offset: usize) -> usize {
+        offset
+    }
+}
 
 impl Alignment for Align1 {
     const SIZE: usize = 1;
@@ -67,20 +75,22 @@ pub struct LittleEndian;
 pub struct BigEndian;
 
 impl Endianness for LittleEndian {
+    // TODO: fix this
+    // it's broken because it works only for u32 right now. We need to make it generic
     fn write_u32(buffer: &mut [u8], value: u32) {
-        buffer.copy_from_slice(&value.to_le_bytes());
+        buffer[..4].copy_from_slice(&value.to_le_bytes());
     }
     fn read_u32(buffer: &[u8]) -> u32 {
-        u32::from_le_bytes(buffer.try_into().unwrap())
+        u32::from_le_bytes(buffer[..4].try_into().unwrap())
     }
 }
 
 impl Endianness for BigEndian {
     fn write_u32(buffer: &mut [u8], value: u32) {
-        buffer.copy_from_slice(&value.to_be_bytes());
+        buffer[..4].copy_from_slice(&value.to_be_bytes());
     }
     fn read_u32(buffer: &[u8]) -> u32 {
-        u32::from_be_bytes(buffer.try_into().unwrap())
+        u32::from_be_bytes(buffer[..4].try_into().unwrap())
     }
     fn is_little_endian() -> bool {
         false
