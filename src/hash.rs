@@ -5,7 +5,7 @@ use crate::{
 };
 
 use alloc::vec::Vec;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use core::hash::Hash;
 use hashbrown::{HashMap, HashSet};
 
@@ -103,11 +103,10 @@ impl<K: Default + Sized + Encoder<K> + Eq + Hash + Ord, V: Default + Sized + Enc
             result
         });
 
-        let mut value_bytes = Bytes::from(value_bytes);
         let values = (0..map_len).map(|i| {
             let mut result = Default::default();
             let offset = A::SIZE.max(V::HEADER_SIZE) * i;
-            V::decode_body::<A, E>(&mut value_bytes, offset, &mut result);
+            V::decode_body::<A, E>(&value_bytes, offset, &mut result);
             result
         });
 
@@ -200,7 +199,7 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoder::{Align0, Align4, Align8, BigEndian, LittleEndian};
+    use crate::encoder::{Align0, Align4, LittleEndian};
     use alloc::vec::Vec;
     use bytes::BytesMut;
     use hashbrown::HashMap;
@@ -254,18 +253,20 @@ mod tests {
 
         assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
 
-        let mut bytes = result.clone();
+        let bytes = result.clone();
         let mut values2 = Default::default();
-        HashMap::decode_body::<Align0, LittleEndian>(&mut bytes, 0, &mut values2);
+        HashMap::decode_body::<Align0, LittleEndian>(&bytes, 0, &mut values2);
         assert_eq!(values, values2);
     }
 
     #[test]
     fn test_vector_of_maps() {
-        let mut values = Vec::new();
-        values.push(HashMap::from([(1, 2), (3, 4)]));
-        values.push(HashMap::new());
-        values.push(HashMap::from([(7, 8), (9, 4)]));
+        let values = vec![
+            HashMap::from([(1, 2), (3, 4)]),
+            HashMap::new(),
+            HashMap::from([(7, 8), (9, 4)]),
+        ];
+
         let mut buffer = BytesMut::new();
         values.encode::<Align4, LittleEndian>(&mut buffer, 0);
 
@@ -274,9 +275,9 @@ mod tests {
         let expected_encoded = "030000000c0000005c000000020000003c000000080000004400000008000000000000004c000000000000004c00000000000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
 
         assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
-        let mut bytes = result.clone();
+        let bytes = result.clone();
         let mut values2 = Default::default();
-        Vec::decode_body::<Align4, LittleEndian>(&mut bytes, 0, &mut values2);
+        Vec::decode_body::<Align4, LittleEndian>(&bytes, 0, &mut values2);
         assert_eq!(values, values2);
     }
 

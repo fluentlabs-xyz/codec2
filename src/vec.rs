@@ -1,10 +1,10 @@
 extern crate alloc;
 use crate::{
     encoder::{Alignment, Encoder, Endianness},
-    evm::{read_bytes, read_bytes_header, write_bytes},
+    evm::{read_bytes, write_bytes},
 };
 use alloc::vec::Vec;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 ///
 /// We encode dynamic arrays as following:
@@ -40,12 +40,6 @@ impl<T: Default + Sized + Encoder<T>> Encoder<Vec<T>> for Vec<T> {
         for (index, obj) in self.iter().enumerate() {
             let elem_offset = A::SIZE.max(T::HEADER_SIZE) * index;
             obj.encode::<A, E>(&mut value_encoder, elem_offset);
-            println!(
-                "value_encoder: {:?}, elem_offset: {:?}, index: {:?}",
-                value_encoder.clone().freeze().to_vec(),
-                elem_offset,
-                index
-            );
         }
 
         write_bytes::<A, E>(buffer, aligned_offset + 4, &value_encoder.freeze());
@@ -107,9 +101,7 @@ impl<T: Default + Sized + Encoder<T>> Encoder<Vec<T>> for Vec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoder::{
-        Align0, Align1, Align2, Align4, Align8, BigEndian, Encoder, LittleEndian,
-    };
+    use crate::encoder::{Align0, Align4, Align8, BigEndian, Encoder, LittleEndian};
 
     #[test]
     fn test_empty_vec_u32() {

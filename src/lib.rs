@@ -6,3 +6,6 @@ mod hash;
 mod primitive;
 mod tuple;
 mod vec;
+
+// #[cfg(test)]
+// mod tests;

@@ -1,4 +1,3 @@
-use std::io::Read;
 
 use crate::encoder::{Alignment, Encoder, Endianness};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};

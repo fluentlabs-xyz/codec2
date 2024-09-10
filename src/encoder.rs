@@ -1,5 +1,4 @@
-use alloy_primitives::Bytes;
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 use core::marker::PhantomData;
 
 pub trait Alignment {
@@ -33,7 +32,6 @@ pub trait Encoder<T: Sized> {
 
 pub struct Align0;
 pub struct Align1;
-
 pub struct Align2;
 pub struct Align4;
 pub struct Align8;
@@ -79,6 +77,7 @@ pub struct BigEndian;
 impl Endianness for LittleEndian {
     // TODO: fix this
     // it's broken because it works only for u32 right now. We need to make it generic
+    // I'm not sure if we really need it. Because we actually need this only for u32 - all offsets, lengths, etc. are u32. So we can just use u32 here
     fn write_u32(buffer: &mut [u8], value: u32) {
         buffer[..4].copy_from_slice(&value.to_le_bytes());
     }
@@ -132,17 +131,7 @@ impl<T: Sized + Encoder<T>, const OFFSET: usize> FieldEncoder<T, OFFSET> {
         offset: usize,
         result: &mut T,
     ) {
-        let mut bytes = bytes::Bytes::copy_from_slice(buffer);
-        T::decode_body::<A, E>(&mut bytes, offset, result)
+        let bytes = bytes::Bytes::copy_from_slice(buffer);
+        T::decode_body::<A, E>(&bytes, offset, result)
     }
-}
-
-fn print_buffer(buffer: &[u8]) {
-    for (i, &byte) in buffer.iter().enumerate() {
-        print!("{:02X} ", byte);
-        if (i + 1) % 8 == 0 {
-            println!();
-        }
-    }
-    println!();
 }

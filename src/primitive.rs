@@ -1,5 +1,5 @@
 use crate::encoder::{Align1, Alignment, Encoder, Endianness};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
 impl Encoder<u8> for u8 {
     const HEADER_SIZE: usize = core::mem::size_of::<u8>();
@@ -236,10 +236,8 @@ impl<T: Sized + Encoder<T>, const N: usize> Encoder<[T; N]> for [T; N] {
 
 #[cfg(test)]
 mod tests {
-    use std::i64;
-
     use super::*;
-    use crate::encoder::{Align1, Align2, Align4, Align8, BigEndian, LittleEndian};
+    use crate::encoder::{Align1, Align4, Align8, BigEndian, LittleEndian};
 
     #[test]
     fn test_u8_encode_decode() {
@@ -415,7 +413,7 @@ mod tests {
             Bytes::from_static(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80])
         );
 
-        // Align4 с смещением 1
+        // Align4
         let mut buffer4_offset = BytesMut::new();
         original.encode::<Align4, LittleEndian>(&mut buffer4_offset, 1);
         let encoded4_offset = buffer4_offset.freeze();
@@ -426,7 +424,7 @@ mod tests {
             ])
         );
 
-        // Align8 с смещением 3
+        // Align8
         let mut buffer8_offset = BytesMut::new();
         original.encode::<Align8, LittleEndian>(&mut buffer8_offset, 3);
         let encoded8_offset = buffer8_offset.freeze();

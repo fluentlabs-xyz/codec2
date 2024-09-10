@@ -1,7 +1,6 @@
 use crate::encoder::{Alignment, Encoder, Endianness};
 use bytes::{Bytes, BytesMut};
 
-// Реализация для кортежа с одним элементом
 impl<T: Encoder<T>> Encoder<(T,)> for (T,) {
     const HEADER_SIZE: usize = T::HEADER_SIZE;
 

@@ -1,8 +1,8 @@
 use crate::{
-    encoder::{Align0, Alignment, Encoder, Endianness, LittleEndian},
+    encoder::{Alignment, Encoder, Endianness},
     evm::{read_bytes_header, write_bytes},
 };
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct EmptyVec;
@@ -10,9 +10,6 @@ pub struct EmptyVec;
 impl Encoder<EmptyVec> for EmptyVec {
     const HEADER_SIZE: usize = 12;
 
-    // TODO: d1r1 check comment bellow
-    /// We don't encode empty vectors, instead we store 0 as length,
-    /// it helps to reduce empty vector size from 12 to 4 bytes.
     fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
         let aligned_offset = A::align(offset);
 
@@ -47,11 +44,10 @@ mod tests {
     use crate::encoder::{Align0, LittleEndian};
 
     use super::*;
-    use alloy_primitives;
 
     #[test]
     fn test_empty() {
-        let values = EmptyVec::default();
+        let values = EmptyVec;
 
         let mut buffer = BytesMut::new();
         values.encode::<Align0, LittleEndian>(&mut buffer, 0);
@@ -69,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_empty_with_offset() {
-        let values = EmptyVec::default();
+        let values = EmptyVec;
         let mut buffer = BytesMut::from(&[0xFF, 0xFF, 0xFF][..]);
         values.encode::<Align0, LittleEndian>(&mut buffer, 3);
 
