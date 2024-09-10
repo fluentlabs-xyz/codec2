@@ -1,6 +1,6 @@
 extern crate alloc;
 use crate::{
-    encoder::{Alignment, Encoder, Endianness},
+    encoder::{Alignment, Encoder, Endian},
     evm::{read_bytes, write_bytes},
 };
 use alloc::vec::Vec;
@@ -20,16 +20,18 @@ use bytes::{Buf, Bytes, BytesMut};
 impl<T: Default + Sized + Encoder<T>> Encoder<Vec<T>> for Vec<T> {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
         let aligned_offset = A::align(offset);
 
-        if buffer.len() < aligned_offset + 4 {
-            buffer.resize(aligned_offset + 4, 0);
+        let elem_size = A::align(4);
+
+        if buffer.len() < aligned_offset + elem_size {
+            buffer.resize(aligned_offset + elem_size, 0);
         }
 
         // Vector size
-        E::write_u32(
-            &mut buffer[aligned_offset..aligned_offset + 4],
+        E::write::<u32>(
+            &mut buffer[aligned_offset..aligned_offset + elem_size],
             self.len() as u32,
         );
 
@@ -45,20 +47,21 @@ impl<T: Default + Sized + Encoder<T>> Encoder<Vec<T>> for Vec<T> {
         write_bytes::<A, E>(buffer, aligned_offset + 4, &value_encoder.freeze());
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &bytes::Bytes,
         field_offset: usize,
         result: &mut Vec<T>,
     ) -> (usize, usize) {
         let aligned_offset = A::align(field_offset);
+        let elem_size = A::align(4);
 
         // TODO: d1r1 maybe we should return an error here?
-        if bytes.remaining() < aligned_offset + 4 {
+        if bytes.remaining() < aligned_offset + elem_size {
             return (0, 0);
         }
 
         // Vector size
-        let count = E::read_u32(&bytes[aligned_offset..aligned_offset + 4]) as usize;
+        let count = E::read::<u32>(&bytes[aligned_offset..aligned_offset + elem_size]) as usize;
 
         // If vector is empty, we don't need to decode anything
         if count == 0 {
@@ -67,24 +70,29 @@ impl<T: Default + Sized + Encoder<T>> Encoder<Vec<T>> for Vec<T> {
         }
 
         // Get data offset and length
-        let data_offset = E::read_u32(&bytes[aligned_offset + 4..aligned_offset + 8]) as usize;
-        let data_length = E::read_u32(&bytes[aligned_offset + 8..aligned_offset + 12]) as usize;
+        let data_offset =
+            E::read::<u32>(&bytes[aligned_offset + elem_size..aligned_offset + elem_size * 2])
+                as usize;
+        let data_length =
+            E::read::<u32>(&bytes[aligned_offset + elem_size * 2..aligned_offset + elem_size * 3])
+                as usize;
 
         result.reserve(data_length);
 
         (data_offset, data_length)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(bytes: &Bytes, offset: usize, result: &mut Vec<T>) {
+    fn decode_body<A: Alignment, E: Endian>(bytes: &Bytes, offset: usize, result: &mut Vec<T>) {
         let aligned_offset = A::align(offset);
-        let data_len = E::read_u32(&bytes[aligned_offset..aligned_offset + 4]) as usize;
+        let elem_size = A::align(4);
+        let data_len = E::read::<u32>(&bytes[aligned_offset..aligned_offset + elem_size]) as usize;
 
         if data_len == 0 {
             result.clear();
             return;
         }
 
-        let input_bytes = read_bytes::<A, E>(bytes, aligned_offset + 4);
+        let input_bytes = read_bytes::<A, E>(bytes, aligned_offset + elem_size);
 
         let elem_size = A::SIZE.max(T::HEADER_SIZE);
         *result = (0..data_len)

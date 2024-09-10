@@ -6,35 +6,31 @@ pub trait Alignment {
     fn align(offset: usize) -> usize;
 }
 
-pub trait Endianness {
-    fn write_u32(buffer: &mut [u8], value: u32);
-    fn read_u32(buffer: &[u8]) -> u32;
-    fn is_little_endian() -> bool {
-        true
-    }
-}
-
 pub trait Encoder<T: Sized> {
     const HEADER_SIZE: usize;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buf: &mut BytesMut, offset: usize);
+    fn encode<A: Alignment, E: Endian>(&self, buf: &mut BytesMut, offset: usize);
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         buf: &bytes::Bytes,
         offset: usize,
         result: &mut T,
     ) -> (usize, usize);
 
-    fn decode_body<A: Alignment, E: Endianness>(buf: &bytes::Bytes, offset: usize, result: &mut T) {
+    fn decode_body<A: Alignment, E: Endian>(buf: &bytes::Bytes, offset: usize, result: &mut T) {
         Self::decode_header::<A, E>(buf, offset, result);
     }
 }
 
+// TODO: d1r1 change Alignment to be a const generic parameter
 pub struct Align0;
 pub struct Align1;
 pub struct Align2;
 pub struct Align4;
 pub struct Align8;
+pub struct Align16;
+pub struct Align32;
+pub struct Align64;
 
 impl Alignment for Align0 {
     const SIZE: usize = 0;
@@ -71,33 +67,103 @@ impl Alignment for Align8 {
     }
 }
 
-pub struct LittleEndian;
-pub struct BigEndian;
-
-impl Endianness for LittleEndian {
-    // TODO: fix this
-    // it's broken because it works only for u32 right now. We need to make it generic
-    // I'm not sure if we really need it. Because we actually need this only for u32 - all offsets, lengths, etc. are u32. So we can just use u32 here
-    fn write_u32(buffer: &mut [u8], value: u32) {
-        buffer[..4].copy_from_slice(&value.to_le_bytes());
-    }
-    fn read_u32(buffer: &[u8]) -> u32 {
-        u32::from_le_bytes(buffer[..4].try_into().unwrap())
+impl Alignment for Align16 {
+    const SIZE: usize = 16;
+    fn align(offset: usize) -> usize {
+        (offset + 15) & !15
     }
 }
 
-impl Endianness for BigEndian {
-    fn write_u32(buffer: &mut [u8], value: u32) {
-        buffer[..4].copy_from_slice(&value.to_be_bytes());
+impl Alignment for Align32 {
+    const SIZE: usize = 32;
+    fn align(offset: usize) -> usize {
+        (offset + 31) & !31
     }
-    fn read_u32(buffer: &[u8]) -> u32 {
-        u32::from_be_bytes(buffer[..4].try_into().unwrap())
+}
+
+impl Alignment for Align64 {
+    const SIZE: usize = 64;
+    fn align(offset: usize) -> usize {
+        (offset + 63) & !63
     }
+}
+
+// ENDIANNESS
+
+pub trait EndianConvert: Sized {
+    type Bytes: AsRef<[u8]> + AsMut<[u8]> + Default;
+
+    fn to_le_bytes(self) -> Self::Bytes;
+    fn to_be_bytes(self) -> Self::Bytes;
+    fn from_le_bytes(bytes: Self::Bytes) -> Self;
+    fn from_be_bytes(bytes: Self::Bytes) -> Self;
+}
+
+impl EndianConvert for u32 {
+    type Bytes = [u8; 4];
+
+    fn to_le_bytes(self) -> Self::Bytes {
+        self.to_le_bytes()
+    }
+    fn to_be_bytes(self) -> Self::Bytes {
+        self.to_be_bytes()
+    }
+    fn from_le_bytes(bytes: Self::Bytes) -> Self {
+        Self::from_le_bytes(bytes)
+    }
+    fn from_be_bytes(bytes: Self::Bytes) -> Self {
+        Self::from_be_bytes(bytes)
+    }
+}
+
+pub trait Endian {
+    fn write<T: EndianConvert>(buffer: &mut [u8], value: T);
+    fn read<T: EndianConvert>(buffer: &[u8]) -> T;
+    fn is_little_endian() -> bool;
+}
+
+pub struct LittleEndian;
+pub struct BigEndian;
+
+impl Endian for LittleEndian {
+    fn write<T: EndianConvert>(buffer: &mut [u8], value: T) {
+        let bytes = value.to_le_bytes();
+        let len = buffer.len().min(bytes.as_ref().len());
+        buffer[..len].copy_from_slice(&bytes.as_ref()[..len]);
+    }
+
+    fn read<T: EndianConvert>(buffer: &[u8]) -> T {
+        let mut bytes = T::Bytes::default();
+        let len = buffer.len().min(bytes.as_ref().len());
+        bytes.as_mut()[..len].copy_from_slice(&buffer[..len]);
+        T::from_le_bytes(bytes)
+    }
+
+    fn is_little_endian() -> bool {
+        true
+    }
+}
+
+impl Endian for BigEndian {
+    fn write<T: EndianConvert>(buffer: &mut [u8], value: T) {
+        let bytes = value.to_be_bytes();
+        let len = buffer.len().min(bytes.as_ref().len());
+        let start = buffer.len() - len;
+        buffer[start..].copy_from_slice(&bytes.as_ref()[bytes.as_ref().len() - len..]);
+    }
+
+    fn read<T: EndianConvert>(buffer: &[u8]) -> T {
+        let mut bytes = T::Bytes::default();
+        let len = buffer.len().min(bytes.as_ref().len());
+        let start = bytes.as_ref().len() - len;
+        bytes.as_mut()[start..].copy_from_slice(&buffer[buffer.len() - len..]);
+        T::from_be_bytes(bytes)
+    }
+
     fn is_little_endian() -> bool {
         false
     }
 }
-
 pub struct FieldEncoder<T: Sized + Encoder<T>, const OFFSET: usize> {
     _phantom: PhantomData<T>,
 }
@@ -106,14 +172,14 @@ impl<T: Sized + Encoder<T>, const OFFSET: usize> FieldEncoder<T, OFFSET> {
     pub const OFFSET: usize = OFFSET;
     pub const FIELD_SIZE: usize = T::HEADER_SIZE;
 
-    pub fn decode_field_header<A: Alignment, E: Endianness>(
+    pub fn decode_field_header<A: Alignment, E: Endian>(
         buffer: &[u8],
         result: &mut T,
     ) -> (usize, usize) {
         Self::decode_field_header_at::<A, E>(buffer, Self::OFFSET, result)
     }
 
-    pub fn decode_field_header_at<A: Alignment, E: Endianness>(
+    pub fn decode_field_header_at<A: Alignment, E: Endian>(
         buffer: &[u8],
         offset: usize,
         result: &mut T,
@@ -122,11 +188,11 @@ impl<T: Sized + Encoder<T>, const OFFSET: usize> FieldEncoder<T, OFFSET> {
         T::decode_header::<A, E>(&bytes, offset, result)
     }
 
-    pub fn decode_field_body<A: Alignment, E: Endianness>(buffer: &[u8], result: &mut T) {
+    pub fn decode_field_body<A: Alignment, E: Endian>(buffer: &[u8], result: &mut T) {
         Self::decode_field_body_at::<A, E>(buffer, Self::OFFSET, result)
     }
 
-    pub fn decode_field_body_at<A: Alignment, E: Endianness>(
+    pub fn decode_field_body_at<A: Alignment, E: Endian>(
         buffer: &[u8],
         offset: usize,
         result: &mut T,

@@ -1,5 +1,5 @@
 use crate::{
-    encoder::{Alignment, Encoder, Endianness},
+    encoder::{Alignment, Encoder, Endian},
     evm::{read_bytes_header, write_bytes},
 };
 use bytes::{Bytes, BytesMut};
@@ -10,18 +10,18 @@ pub struct EmptyVec;
 impl Encoder<EmptyVec> for EmptyVec {
     const HEADER_SIZE: usize = 12;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
         let aligned_offset = A::align(offset);
 
         if buffer.len() < aligned_offset + Self::HEADER_SIZE {
             buffer.resize(aligned_offset + Self::HEADER_SIZE, 0);
         };
-        E::write_u32(&mut buffer[aligned_offset..aligned_offset + 4], 0);
+        E::write::<u32>(&mut buffer[aligned_offset..aligned_offset + 4], 0);
 
         write_bytes::<A, E>(buffer, aligned_offset + 4, &[]);
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &Bytes,
         offset: usize,
         _result: &mut EmptyVec,
@@ -33,7 +33,7 @@ impl Encoder<EmptyVec> for EmptyVec {
             return (0, 0);
         }
 
-        let count = E::read_u32(&bytes[aligned_offset..aligned_offset + 4]) as usize;
+        let count = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
         debug_assert_eq!(count, 0);
         read_bytes_header::<A, E>(bytes, aligned_offset + 4)
     }

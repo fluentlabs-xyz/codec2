@@ -1,6 +1,6 @@
 extern crate alloc;
 use crate::{
-    encoder::{Alignment, Encoder, Endianness},
+    encoder::{Alignment, Encoder, Endian},
     evm::{read_bytes, read_bytes_header, write_bytes},
 };
 
@@ -15,7 +15,7 @@ impl<K: Default + Sized + Encoder<K> + Eq + Hash + Ord, V: Default + Sized + Enc
     // length + keys (bytes) + values (bytes)
     const HEADER_SIZE: usize = 4 + 8 + 8;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
         let aligned_offset = A::align(offset);
 
         // Make sure buffer is large enough to store map size
@@ -24,7 +24,7 @@ impl<K: Default + Sized + Encoder<K> + Eq + Hash + Ord, V: Default + Sized + Enc
         }
 
         // Write map size
-        E::write_u32(
+        E::write::<u32>(
             &mut buffer[aligned_offset..aligned_offset + 4],
             self.len() as u32,
         );
@@ -53,7 +53,7 @@ impl<K: Default + Sized + Encoder<K> + Eq + Hash + Ord, V: Default + Sized + Enc
         write_bytes::<A, E>(buffer, aligned_offset + 12, &value_buffer);
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &Bytes,
         offset: usize,
         result: &mut HashMap<K, V>,
@@ -64,7 +64,7 @@ impl<K: Default + Sized + Encoder<K> + Eq + Hash + Ord, V: Default + Sized + Enc
             return (0, 0);
         }
 
-        let map_len = E::read_u32(&bytes[aligned_offset..aligned_offset + 4]) as usize;
+        let map_len = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
 
         if map_len == 0 {
             result.clear();
@@ -79,13 +79,13 @@ impl<K: Default + Sized + Encoder<K> + Eq + Hash + Ord, V: Default + Sized + Enc
         (keys_offset, keys_length + values_length)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
+    fn decode_body<A: Alignment, E: Endian>(
         bytes: &Bytes,
         offset: usize,
         result: &mut HashMap<K, V>,
     ) {
         let aligned_offset = A::align(offset);
-        let map_len = E::read_u32(&bytes[aligned_offset..aligned_offset + 4]) as usize;
+        let map_len = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
 
         if map_len == 0 {
             result.clear();
@@ -118,7 +118,7 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
     // length (4) + keys (8) (bytes)
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
         let aligned_offset = A::align(offset);
 
         if buffer.len() < aligned_offset + 4 {
@@ -126,7 +126,7 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
         }
 
         // HashSet size
-        E::write_u32(
+        E::write::<u32>(
             &mut buffer[aligned_offset..aligned_offset + 4],
             self.len() as u32,
         );
@@ -146,7 +146,7 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
         write_bytes::<A, E>(buffer, aligned_offset + 4, &value_buffer);
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &Bytes,
         field_offset: usize,
         result: &mut HashSet<T>,
@@ -157,7 +157,7 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
             return (0, 0);
         }
 
-        let count = E::read_u32(&bytes[aligned_offset..aligned_offset + 4]) as usize;
+        let count = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
 
         if count == 0 {
             result.clear();
@@ -171,13 +171,9 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
         (data_offset, data_length)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
-        bytes: &Bytes,
-        offset: usize,
-        result: &mut HashSet<T>,
-    ) {
+    fn decode_body<A: Alignment, E: Endian>(bytes: &Bytes, offset: usize, result: &mut HashSet<T>) {
         let aligned_offset = A::align(offset);
-        let count = E::read_u32(&bytes[aligned_offset..aligned_offset + 4]) as usize;
+        let count = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
 
         if count == 0 {
             result.clear();

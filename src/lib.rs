@@ -7,5 +7,5 @@ mod primitive;
 mod tuple;
 mod vec;
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;

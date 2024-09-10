@@ -1,5 +1,4 @@
-
-use crate::encoder::{Alignment, Encoder, Endianness};
+use crate::encoder::{Alignment, Encoder, Endian};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use bytes::BytesMut;
 
@@ -8,7 +7,7 @@ use bytes::BytesMut;
 // To avoid resizing buffer, you can pre-allocate the buffer with the size of the header before calling this function
 // The header contains the offset and length of the data
 // The actual data is appended to the buffer, after the header
-pub fn write_bytes<A: Alignment, E: Endianness>(
+pub fn write_bytes<A: Alignment, E: Endian>(
     buffer: &mut BytesMut,
     offset: usize,
     bytes: &[u8],
@@ -16,8 +15,10 @@ pub fn write_bytes<A: Alignment, E: Endianness>(
     let aligned_offset = A::align(offset);
 
     // header = offset (u32) + data_length (u32)
+    let elem_size = A::align(4);
+
     // u32 + u32 = 8 bytes
-    let header_size = A::align(8);
+    let header_size = A::align(elem_size * 2);
 
     if buffer.len() < aligned_offset + header_size {
         buffer.resize(aligned_offset + header_size, 0);
@@ -26,12 +27,14 @@ pub fn write_bytes<A: Alignment, E: Endianness>(
     let data_offset = buffer.len();
 
     // Write header
-    E::write_u32(
-        &mut buffer[aligned_offset..aligned_offset + 4],
+    // offset
+    E::write::<u32>(
+        &mut buffer[aligned_offset..aligned_offset + elem_size],
         data_offset as u32,
     );
-    E::write_u32(
-        &mut buffer[aligned_offset + 4..aligned_offset + 8],
+    // length
+    E::write::<u32>(
+        &mut buffer[aligned_offset + elem_size..aligned_offset + elem_size * 2],
         bytes.len() as u32,
     );
 
@@ -41,48 +44,53 @@ pub fn write_bytes<A: Alignment, E: Endianness>(
     header_size
 }
 
-pub fn read_bytes<A: Alignment, E: Endianness>(
+pub fn read_bytes<A: Alignment, E: Endian>(
     bytes: &bytes::Bytes,
     field_offset: usize,
 ) -> bytes::Bytes {
     let aligned_header_offset = A::align(field_offset);
+    let elem_size = A::align(4);
     let slice = bytes.slice(aligned_header_offset..);
-    let offset = E::read_u32(&slice[..4]) as usize;
-    let length = E::read_u32(&slice[4..8]) as usize;
+    let offset = E::read::<u32>(&slice[..elem_size]) as usize;
+    let length = E::read::<u32>(&slice[elem_size..elem_size * 2]) as usize;
     bytes.slice(offset..offset + length)
 }
 
-pub fn read_bytes_header<A: Alignment, E: Endianness>(
+pub fn read_bytes_header<A: Alignment, E: Endian>(
     bytes: &bytes::Bytes,
     field_offset: usize,
 ) -> (usize, usize) {
     let aligned_header_offset = A::align(field_offset);
+    let elem_size = A::align(4);
+
     let slice = bytes.slice(aligned_header_offset..);
-    let offset = E::read_u32(&slice[..4]) as usize;
-    let length = E::read_u32(&slice[4..8]) as usize;
+    let offset = E::read::<u32>(&slice[..elem_size]) as usize;
+    let length = E::read::<u32>(&slice[elem_size..elem_size * 2]) as usize;
     (offset, length)
 }
 
 impl Encoder<Bytes> for Bytes {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, field_offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
         write_bytes::<A, E>(buffer, field_offset, self);
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &bytes::Bytes,
         field_offset: usize,
         _result: &mut Bytes,
     ) -> (usize, usize) {
         let aligned_header_offset = A::align(field_offset);
+        let elem_size = A::align(4);
+
         let slice = bytes.slice(aligned_header_offset..);
-        let offset = E::read_u32(&slice[..4]) as usize;
-        let length = E::read_u32(&slice[4..8]) as usize;
+        let offset = E::read::<u32>(&slice[..elem_size]) as usize;
+        let length = E::read::<u32>(&slice[elem_size..elem_size * 2]) as usize;
         (offset, length)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
+    fn decode_body<A: Alignment, E: Endian>(
         bytes: &bytes::Bytes,
         field_offset: usize,
         result: &mut Bytes,
@@ -96,13 +104,13 @@ impl Encoder<Bytes> for Bytes {
 impl<const N: usize> Encoder<FixedBytes<N>> for FixedBytes<N> {
     const HEADER_SIZE: usize = N;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, field_offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
         let aligned_offset = A::align(field_offset);
         buffer.resize(aligned_offset + N, 0);
         buffer[aligned_offset..aligned_offset + N].copy_from_slice(&self.0);
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &bytes::Bytes,
         field_offset: usize,
         result: &mut FixedBytes<N>,
@@ -114,7 +122,7 @@ impl<const N: usize> Encoder<FixedBytes<N>> for FixedBytes<N> {
         (0, 0)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
+    fn decode_body<A: Alignment, E: Endian>(
         bytes: &bytes::Bytes,
         field_offset: usize,
         result: &mut FixedBytes<N>,
@@ -128,15 +136,11 @@ macro_rules! impl_evm_fixed {
         impl Encoder<$typ> for $typ {
             const HEADER_SIZE: usize = <$typ>::len_bytes();
 
-            fn encode<A: Alignment, E: Endianness>(
-                &self,
-                buffer: &mut BytesMut,
-                field_offset: usize,
-            ) {
+            fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
                 self.0.encode::<A, E>(buffer, field_offset);
             }
 
-            fn decode_header<A: Alignment, E: Endianness>(
+            fn decode_header<A: Alignment, E: Endian>(
                 bytes: &bytes::Bytes,
                 field_offset: usize,
                 result: &mut $typ,
@@ -148,7 +152,7 @@ macro_rules! impl_evm_fixed {
                 )
             }
 
-            fn decode_body<A: Alignment, E: Endianness>(
+            fn decode_body<A: Alignment, E: Endian>(
                 bytes: &bytes::Bytes,
                 field_offset: usize,
                 result: &mut $typ,
@@ -164,7 +168,7 @@ impl_evm_fixed!(Address);
 impl<const BITS: usize, const LIMBS: usize> Encoder<Uint<BITS, LIMBS>> for Uint<BITS, LIMBS> {
     const HEADER_SIZE: usize = Self::BYTES;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, field_offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
         let aligned_offset = A::align(field_offset);
         buffer.resize(aligned_offset + Self::BYTES, 0);
         let bytes = &mut buffer[aligned_offset..aligned_offset + Self::BYTES];
@@ -175,7 +179,7 @@ impl<const BITS: usize, const LIMBS: usize> Encoder<Uint<BITS, LIMBS>> for Uint<
         }
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &bytes::Bytes,
         field_offset: usize,
         result: &mut Uint<BITS, LIMBS>,
@@ -191,7 +195,7 @@ impl<const BITS: usize, const LIMBS: usize> Encoder<Uint<BITS, LIMBS>> for Uint<
         (0, 0)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
+    fn decode_body<A: Alignment, E: Endian>(
         bytes: &bytes::Bytes,
         field_offset: usize,
         result: &mut Uint<BITS, LIMBS>,
@@ -203,8 +207,9 @@ impl<const BITS: usize, const LIMBS: usize> Encoder<Uint<BITS, LIMBS>> for Uint<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoder::{Align1, Align4, Align8, BigEndian, LittleEndian};
+    use crate::encoder::{Align0, Align1, Align32, Align4, Align8, BigEndian, LittleEndian};
     use alloy_primitives::{Address, U256};
+    use ethabi::Token;
     // use hex;
     // use hex_literal::hex;
 
@@ -291,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_uint_encode_decode_mixed_endianness() {
+    fn test_uint_encode_decode_mixed_Endian() {
         let original = U256::from(0x1234567890abcdef_u64);
         let mut buffer = BytesMut::new();
 
@@ -332,16 +337,16 @@ mod tests {
     }
 
     #[test]
-    fn test_bytes_a8() {
+    fn test_bytes_a4() {
         let original = Bytes::from_static(b"Hello, World");
         let mut buffer = BytesMut::new();
-        original.encode::<Align8, LittleEndian>(&mut buffer, 0);
+        original.encode::<Align4, LittleEndian>(&mut buffer, 0);
 
         let encoded = buffer.freeze();
-        println!("Encoded (A8): {}", hex::encode(&encoded));
+        println!("Encoded (A4): {}", hex::encode(&encoded));
 
         let mut decoded = Bytes::new();
-        Bytes::decode_body::<Align8, LittleEndian>(&encoded, 0, &mut decoded);
+        Bytes::decode_body::<Align4, LittleEndian>(&encoded, 0, &mut decoded);
 
         assert_eq!(original, decoded);
         assert_eq!(
@@ -365,7 +370,7 @@ mod tests {
         assert_eq!(original, decoded);
         assert_eq!(
             hex::encode(&encoded),
-            "ffffff0000000000100000000500000048656c6c6f"
+            "ffffff00000000001800000000000000050000000000000048656c6c6f"
         );
     }
 }

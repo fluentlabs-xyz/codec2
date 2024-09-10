@@ -1,10 +1,10 @@
-use crate::encoder::{Align1, Alignment, Encoder, Endianness};
+use crate::encoder::{Align1, Alignment, Encoder, Endian};
 use bytes::{Bytes, BytesMut};
 
 impl Encoder<u8> for u8 {
     const HEADER_SIZE: usize = core::mem::size_of::<u8>();
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, field_offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
         let aligned_offset = A::align(field_offset);
         if buffer.len() < aligned_offset + Self::HEADER_SIZE {
             buffer.resize(aligned_offset + Self::HEADER_SIZE, 0);
@@ -12,7 +12,7 @@ impl Encoder<u8> for u8 {
         buffer[aligned_offset] = *self;
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &Bytes,
         field_offset: usize,
         result: &mut u8,
@@ -25,11 +25,7 @@ impl Encoder<u8> for u8 {
         (0, Self::HEADER_SIZE)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
-        bytes: &Bytes,
-        field_offset: usize,
-        result: &mut u8,
-    ) {
+    fn decode_body<A: Alignment, E: Endian>(bytes: &Bytes, field_offset: usize, result: &mut u8) {
         Self::decode_header::<A, E>(bytes, field_offset, result);
     }
 }
@@ -37,24 +33,25 @@ impl Encoder<u8> for u8 {
 impl Encoder<bool> for bool {
     const HEADER_SIZE: usize = core::mem::size_of::<bool>();
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, field_offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
         let aligned_offset = A::align(field_offset);
-        let total_size = aligned_offset + A::SIZE;
+        let total_size = aligned_offset + A::align(Self::HEADER_SIZE);
+
         if buffer.len() < total_size {
             buffer.resize(total_size, 0);
         }
-        // Заполняем нулями от field_offset до aligned_offset
-        for i in field_offset..aligned_offset {
-            buffer[i] = 0;
-        }
+
+        // Fill padding with zeros
+        buffer[field_offset..aligned_offset].fill(0);
+
+        // Write the boolean value
         buffer[aligned_offset] = *self as u8;
-        // Заполняем оставшиеся байты выравнивания нулями
-        for i in (aligned_offset + 1)..total_size {
-            buffer[i] = 0;
-        }
+
+        // Fill the rest with zeros if there's space after alignment
+        buffer[aligned_offset + 1..total_size].fill(0);
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &Bytes,
         field_offset: usize,
         result: &mut bool,
@@ -67,11 +64,7 @@ impl Encoder<bool> for bool {
         (0, A::SIZE)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
-        bytes: &Bytes,
-        field_offset: usize,
-        result: &mut bool,
-    ) {
+    fn decode_body<A: Alignment, E: Endian>(bytes: &Bytes, field_offset: usize, result: &mut bool) {
         Self::decode_header::<A, E>(bytes, field_offset, result);
     }
 }
@@ -81,51 +74,55 @@ macro_rules! impl_int {
         impl Encoder<$typ> for $typ {
             const HEADER_SIZE: usize = core::mem::size_of::<$typ>();
 
-            fn encode<A: Alignment, E: Endianness>(
-                &self,
-                buffer: &mut BytesMut,
-                field_offset: usize,
-            ) {
+            fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
                 let aligned_offset = A::align(field_offset);
-                let total_size = aligned_offset + A::SIZE.max(Self::HEADER_SIZE);
+                let word_size = A::align(Self::HEADER_SIZE);
+
+                let total_size = aligned_offset + word_size;
                 if buffer.len() < total_size {
                     buffer.resize(total_size, 0);
                 }
-                // Заполняем нулями от field_offset до aligned_offset
-                for i in field_offset..aligned_offset {
-                    buffer[i] = 0;
-                }
+                // fill with zeros from field_offset to aligned_offset
+                buffer[field_offset..aligned_offset].fill(0);
+
                 let bytes = if E::is_little_endian() {
                     self.to_le_bytes()
                 } else {
                     self.to_be_bytes()
                 };
+
+                // Copy only the actual size of the type, not the aligned size
                 buffer[aligned_offset..aligned_offset + Self::HEADER_SIZE].copy_from_slice(&bytes);
-                // Заполняем оставшиеся байты выравнивания нулями
-                for i in (aligned_offset + Self::HEADER_SIZE)..total_size {
-                    buffer[i] = 0;
-                }
+
+                // Fill the rest with zeros if elem_size > Self::HEADER_SIZE
+                buffer[aligned_offset + Self::HEADER_SIZE..total_size].fill(0);
             }
 
-            fn decode_header<A: Alignment, E: Endianness>(
+            fn decode_header<A: Alignment, E: Endian>(
                 bytes: &Bytes,
                 field_offset: usize,
                 result: &mut $typ,
             ) -> (usize, usize) {
                 let aligned_offset = A::align(field_offset);
+                let elem_size = A::align(Self::HEADER_SIZE);
+
                 if bytes.len() < aligned_offset + Self::HEADER_SIZE {
                     return (0, 0);
                 }
-                let slice = &bytes[aligned_offset..aligned_offset + Self::HEADER_SIZE];
+
+                let mut byte_array = [0u8; core::mem::size_of::<$typ>()];
+                byte_array
+                    .copy_from_slice(&bytes[aligned_offset..aligned_offset + Self::HEADER_SIZE]);
+
                 *result = if E::is_little_endian() {
-                    <$typ>::from_le_bytes(slice.try_into().unwrap())
+                    <$typ>::from_le_bytes(byte_array)
                 } else {
-                    <$typ>::from_be_bytes(slice.try_into().unwrap())
+                    <$typ>::from_be_bytes(byte_array)
                 };
-                (0, A::SIZE.max(Self::HEADER_SIZE))
+                (0, elem_size)
             }
 
-            fn decode_body<A: Alignment, E: Endianness>(
+            fn decode_body<A: Alignment, E: Endian>(
                 bytes: &Bytes,
                 field_offset: usize,
                 result: &mut $typ,
@@ -146,30 +143,27 @@ impl_int!(i64);
 impl<T: Sized + Encoder<T> + Default> Encoder<Option<T>> for Option<T> {
     const HEADER_SIZE: usize = 1 + T::HEADER_SIZE;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, field_offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
         let aligned_offset = A::align(field_offset);
         let total_size = aligned_offset + A::SIZE.max(Self::HEADER_SIZE);
         if buffer.len() < total_size {
             buffer.resize(total_size, 0);
         }
-        // Заполняем нулями от field_offset до aligned_offset
-        for i in field_offset..aligned_offset {
-            buffer[i] = 0;
-        }
+
+        buffer[field_offset..aligned_offset].fill(0);
+
         let option_flag = if self.is_some() { 1u8 } else { 0u8 };
         buffer[aligned_offset] = option_flag;
         if let Some(value) = self {
-            value.encode::<Align1, E>(buffer, aligned_offset + 1);
+            value.encode::<A, E>(buffer, aligned_offset + 1);
         } else {
-            T::default().encode::<Align1, E>(buffer, aligned_offset + 1);
+            T::default().encode::<A, E>(buffer, aligned_offset + 1);
         }
-        // Заполняем оставшиеся байты выравнивания нулями
-        for i in (aligned_offset + Self::HEADER_SIZE)..total_size {
-            buffer[i] = 0;
-        }
+
+        buffer[aligned_offset + Self::HEADER_SIZE..total_size].fill(0);
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &Bytes,
         field_offset: usize,
         result: &mut Option<T>,
@@ -182,8 +176,7 @@ impl<T: Sized + Encoder<T> + Default> Encoder<Option<T>> for Option<T> {
 
         if option_flag != 0 {
             let mut inner_value = T::default();
-            let (_, size) =
-                T::decode_header::<Align1, E>(bytes, aligned_offset + 1, &mut inner_value);
+            let (_, size) = T::decode_header::<A, E>(bytes, aligned_offset + 1, &mut inner_value);
             *result = Some(inner_value);
             (0, A::SIZE.max(1 + size))
         } else {
@@ -192,7 +185,7 @@ impl<T: Sized + Encoder<T> + Default> Encoder<Option<T>> for Option<T> {
         }
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
+    fn decode_body<A: Alignment, E: Endian>(
         bytes: &Bytes,
         field_offset: usize,
         result: &mut Option<T>,
@@ -204,13 +197,13 @@ impl<T: Sized + Encoder<T> + Default> Encoder<Option<T>> for Option<T> {
 impl<T: Sized + Encoder<T>, const N: usize> Encoder<[T; N]> for [T; N] {
     const HEADER_SIZE: usize = T::HEADER_SIZE * N;
 
-    fn encode<A: Alignment, E: Endianness>(&self, buffer: &mut BytesMut, field_offset: usize) {
+    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, field_offset: usize) {
         for (i, item) in self.iter().enumerate() {
             item.encode::<A, E>(buffer, field_offset + i * T::HEADER_SIZE);
         }
     }
 
-    fn decode_header<A: Alignment, E: Endianness>(
+    fn decode_header<A: Alignment, E: Endian>(
         bytes: &Bytes,
         field_offset: usize,
         result: &mut [T; N],
@@ -225,7 +218,7 @@ impl<T: Sized + Encoder<T>, const N: usize> Encoder<[T; N]> for [T; N] {
         (0, Self::HEADER_SIZE)
     }
 
-    fn decode_body<A: Alignment, E: Endianness>(
+    fn decode_body<A: Alignment, E: Endian>(
         bytes: &Bytes,
         field_offset: usize,
         result: &mut [T; N],
@@ -262,7 +255,9 @@ mod tests {
         original.encode::<Align8, LittleEndian>(&mut buffer, 0);
 
         let encoded = buffer.freeze();
-        assert_eq!(encoded, Bytes::from_static(&[1, 0, 0, 0, 0, 0, 0, 0]));
+        println!("encoded: {:?}", hex::encode(&encoded));
+        let expected = Bytes::from_static(&[1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(encoded, expected);
 
         let mut decoded = false;
         bool::decode_body::<Align8, LittleEndian>(&encoded, 0, &mut decoded);
@@ -368,17 +363,19 @@ mod tests {
 
     #[test]
     fn test_option_u16_encode_decode() {
-        let original: Option<u16> = Some(1234);
+        let original: Option<u32> = Some(0x12345678u32);
         let mut buffer = BytesMut::new();
 
-        original.encode::<Align8, BigEndian>(&mut buffer, 0);
+        original.encode::<Align4, LittleEndian>(&mut buffer, 0);
 
         let encoded = buffer.freeze();
         println!("{:?}", hex::encode(&encoded));
-        assert_eq!(encoded, Bytes::from_static(&[1, 4, 210, 0, 0, 0, 0, 0])); // 1 (Some), then 1234 in big-endian
 
-        let mut decoded: Option<u16> = None;
-        Option::<u16>::decode_body::<Align8, BigEndian>(&encoded, 0, &mut decoded);
+        let expected_encoded = "0100000078563412"; // 1 (Some), then 12345678 in little-endian
+        assert_eq!(hex::encode(&encoded), expected_encoded);
+
+        let mut decoded: Option<u32> = None;
+        Option::<u32>::decode_body::<Align4, LittleEndian>(&encoded, 0, &mut decoded);
 
         assert_eq!(original, decoded);
     }

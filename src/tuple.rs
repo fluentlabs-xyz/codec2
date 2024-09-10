@@ -1,15 +1,15 @@
-use crate::encoder::{Alignment, Encoder, Endianness};
+use crate::encoder::{Alignment, Encoder, Endian};
 use bytes::{Bytes, BytesMut};
 
 impl<T: Encoder<T>> Encoder<(T,)> for (T,) {
     const HEADER_SIZE: usize = T::HEADER_SIZE;
 
-    fn encode<AL: Alignment, EN: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
+    fn encode<AL: Alignment, EN: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
         let aligned_offset = AL::align(offset);
         self.0.encode::<AL, EN>(buffer, aligned_offset);
     }
 
-    fn decode_header<AL: Alignment, EN: Endianness>(
+    fn decode_header<AL: Alignment, EN: Endian>(
         bytes: &Bytes,
         offset: usize,
         result: &mut (T,),
@@ -18,7 +18,7 @@ impl<T: Encoder<T>> Encoder<(T,)> for (T,) {
         T::decode_header::<AL, EN>(bytes, aligned_offset, &mut result.0)
     }
 
-    fn decode_body<AL: Alignment, EN: Endianness>(bytes: &Bytes, offset: usize, result: &mut (T,)) {
+    fn decode_body<AL: Alignment, EN: Endian>(bytes: &Bytes, offset: usize, result: &mut (T,)) {
         let aligned_offset = AL::align(offset);
         T::decode_body::<AL, EN>(bytes, aligned_offset, &mut result.0);
     }
@@ -29,7 +29,7 @@ macro_rules! impl_encoder_for_tuple {
         impl<$($T: Encoder<$T>,)+> Encoder<($($T,)+)> for ($($T,)+) {
             const HEADER_SIZE: usize = $($T::HEADER_SIZE +)+ 0;
 
-            fn encode<AL: Alignment, EN: Endianness>(&self, buffer: &mut BytesMut, offset: usize) {
+            fn encode<AL: Alignment, EN: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
                 let aligned_offset = AL::align(offset);
                 let mut current_offset = aligned_offset;
                 $(
@@ -38,7 +38,7 @@ macro_rules! impl_encoder_for_tuple {
                 )+
             }
 
-            fn decode_header<AL: Alignment, EN: Endianness>(
+            fn decode_header<AL: Alignment, EN: Endian>(
                 bytes: &Bytes,
                 offset: usize,
                 result: &mut ($($T,)+),
@@ -54,7 +54,7 @@ macro_rules! impl_encoder_for_tuple {
                 (aligned_offset, total_length)
             }
 
-            fn decode_body<AL: Alignment, EN: Endianness>(
+            fn decode_body<AL: Alignment, EN: Endian>(
                 bytes: &Bytes,
                 offset: usize,
                 result: &mut ($($T,)+),
