@@ -1,6 +1,6 @@
 extern crate alloc;
 use crate::{
-    encoder2::{Alignment, Encoder, Endianness},
+    encoder::{Alignment, Encoder, Endianness},
     evm::{read_bytes, read_bytes_header, write_bytes},
 };
 use alloc::vec::Vec;
@@ -107,7 +107,7 @@ impl<T: Default + Sized + Encoder<T>> Encoder<Vec<T>> for Vec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoder2::{
+    use crate::encoder::{
         Align0, Align1, Align2, Align4, Align8, BigEndian, Encoder, LittleEndian,
     };
 

@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use crate::encoder2::{Alignment, Encoder, Endianness};
+use crate::encoder::{Alignment, Encoder, Endianness};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use bytes::BytesMut;
 
@@ -23,12 +23,13 @@ pub fn write_bytes<A: Alignment, E: Endianness>(
     if buffer.len() < aligned_offset + header_size {
         buffer.resize(aligned_offset + header_size, 0);
     }
-    let header_offset = buffer.len();
+    // Offset of the data since the beginning of the buffer
+    let data_offset = buffer.len();
 
     // Write header
     E::write_u32(
         &mut buffer[aligned_offset..aligned_offset + 4],
-        header_offset as u32,
+        data_offset as u32,
     );
     E::write_u32(
         &mut buffer[aligned_offset + 4..aligned_offset + 8],
@@ -203,7 +204,7 @@ impl<const BITS: usize, const LIMBS: usize> Encoder<Uint<BITS, LIMBS>> for Uint<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoder2::{Align1, Align4, Align8, BigEndian, LittleEndian};
+    use crate::encoder::{Align1, Align4, Align8, BigEndian, LittleEndian};
     use alloy_primitives::{Address, U256};
     // use hex;
     // use hex_literal::hex;

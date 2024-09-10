@@ -1,6 +1,6 @@
 extern crate alloc;
 use crate::{
-    encoder2::{Alignment, Encoder, Endianness},
+    encoder::{Alignment, Encoder, Endianness},
     evm::{read_bytes, read_bytes_header, write_bytes},
 };
 
@@ -200,7 +200,7 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoder2::{Align0, Align4, Align8, BigEndian, LittleEndian};
+    use crate::encoder::{Align0, Align4, Align8, BigEndian, LittleEndian};
     use alloc::vec::Vec;
     use bytes::BytesMut;
     use hashbrown::HashMap;

@@ -1,4 +1,4 @@
-use crate::encoder2::{Align1, Alignment, Encoder, Endianness};
+use crate::encoder::{Align1, Alignment, Encoder, Endianness};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 impl Encoder<u8> for u8 {
@@ -239,7 +239,7 @@ mod tests {
     use std::i64;
 
     use super::*;
-    use crate::encoder2::{Align1, Align2, Align4, Align8, BigEndian, LittleEndian};
+    use crate::encoder::{Align1, Align2, Align4, Align8, BigEndian, LittleEndian};
 
     #[test]
     fn test_u8_encode_decode() {

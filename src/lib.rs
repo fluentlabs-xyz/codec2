@@ -1,6 +1,8 @@
-mod encoder2;
+mod encoder;
 
+mod empty;
 mod evm;
 mod hash;
 mod primitive;
+mod tuple;
 mod vec;
