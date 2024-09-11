@@ -12,7 +12,7 @@ pub enum EncoderError {
     UnexpectedEof,
 }
 
-pub trait Encoder: Sized {
+pub trait Encoder: Sized + Default {
     /// The size of the header for this encodable type.
     const HEADER_SIZE: usize;
 
