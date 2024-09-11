@@ -12,6 +12,12 @@ pub enum EncoderError {
     UnexpectedEof,
 }
 
+// TODO: @d1r1 Investigate whether decoding the result into an uninitialized memory (e.g., using `MaybeUninit`)
+// would be more efficient than initializing with `Default`.
+// This could potentially reduce unnecessary memory initialization overhead in cases where
+// the default value is not required before the actual decoding takes place.
+// Consider benchmarking both approaches to measure performance differences.
+
 pub trait Encoder: Sized + Default {
     /// The size of the header for this encodable type.
     const HEADER_SIZE: usize;
