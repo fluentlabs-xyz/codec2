@@ -31,27 +31,35 @@ pub trait Encoder: Sized {
         buf: &mut impl BufMut,
         offset: usize,
     ) -> Result<(), EncoderError> {
+        // Align the offset and header size
         let aligned_offset = align::<ALIGN>(offset);
-        if buf.remaining_mut() < aligned_offset + Self::HEADER_SIZE {
+        let aligned_header_size = align::<ALIGN>(Self::HEADER_SIZE);
+
+        // Check if the buffer is large enough
+        if buf.remaining_mut() < aligned_offset + aligned_header_size {
             return Err(EncoderError::BufferTooSmall);
         }
 
+        // Encode the value
         self.encode_inner::<B, ALIGN>(buf, aligned_offset)
     }
 
-    /// Encodes the value into the given buffer at the specified offset.
-    /// This method is called after the buffer has been aligned.
-    /// The default implementation calls `encode` after aligning the offset.
-    /// Override this method if you need to perform additional operations before encoding.
+    /// Encodes the value into the given buffer at the specified aligned offset.
+    ///
+    /// Note: This method is called internally by the `encode` function after the buffer has been checked for
+    /// sufficient size and the offset has been aligned. It does **not** perform any buffer size validation.
+    /// The caller must ensure that the buffer is large enough before calling this method.
     ///
     /// # Arguments
     ///
-    /// * `buf` - The buffer to encode into.
+    /// * `buf` - The buffer into which the value will be encoded.
     /// * `offset` - The aligned offset in the buffer to start encoding at.
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if encoding was successful, or an `EncoderError` if there was a problem.
+    /// Returns `Ok(())` if encoding was successful, or an `EncoderError` if there was an issue during encoding.
+    ///
+    /// This method should be overridden if additional operations are required before encoding the value.
     fn encode_inner<B: ByteOrder, const ALIGN: usize>(
         &self,
         buf: &mut impl BufMut,
