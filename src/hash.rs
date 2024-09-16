@@ -194,8 +194,8 @@ impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::encoder::{Align0, Align4, LittleEndian};
+    // use super::*;
+    use crate::encoder::{Align0, Align4, Encoder, LittleEndian};
     use alloc::vec::Vec;
     use bytes::BytesMut;
     use hashbrown::HashMap;

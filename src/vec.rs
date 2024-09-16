@@ -6,6 +6,94 @@ use crate::{
 use alloc::vec::Vec;
 use bytes::{Buf, Bytes, BytesMut};
 
+pub trait SolidityVecEncoding<T: Default + Sized + Encoder<T>> {
+    fn encode_abi<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, offset: usize);
+    fn decode_abi_header<A: Alignment, E: Endian>(
+        bytes: &Bytes,
+        field_offset: usize,
+    ) -> (usize, usize);
+    fn decode_abi_body<A: Alignment, E: Endian>(bytes: &Bytes, offset: usize, result: &mut Vec<T>);
+}
+
+// Пример вложенного массива
+// [[1, 2], [3, 4, 5]]
+
+// 0000000000000000000000000000000000000000000000000000000000000020  // (1) Смещение до начала данных внешнего массива (32)
+// ---------------------------------------------------------------------
+// 0000000000000000000000000000000000000000000000000000000000000002  // (2) Длина внешнего массива (2)
+// 0000000000000000000000000000000000000000000000000000000000000040  // (3) Смещение до первого внутреннего массива (64)
+// 00000000000000000000000000000000000000000000000000000000000000a0  // (4) Смещение до второго внутреннего массива (160)
+// ---------------------------------------------------------------------
+// 0000000000000000000000000000000000000000000000000000000000000002  // (5) Длина первого внутреннего массива (2)
+// ---------------------------------------------------------------------
+// 0000000000000000000000000000000000000000000000000000000000000001  // (6) Элемент 1 первого внутреннего массива
+// 0000000000000000000000000000000000000000000000000000000000000002  // (7) Элемент 2 первого внутреннего массива
+// ---------------------------------------------------------------------
+// 0000000000000000000000000000000000000000000000000000000000000003  // (8) Длина второго внутреннего массива (3)
+// ---------------------------------------------------------------------
+// 0000000000000000000000000000000000000000000000000000000000000003  // (9) Элемент 1 второго внутреннего массива
+// 0000000000000000000000000000000000000000000000000000000000000004  // (10) Элемент 2 второго внутреннего массива
+// 0000000000000000000000000000000000000000000000000000000000000005  // (11) Элемент 3 второго внутреннего массива
+impl<T: Default + Sized + Encoder<T>> SolidityVecEncoding<T> for Vec<T> {
+    fn encode_abi<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
+        let aligned_offset = A::align(offset);
+
+        let elem_size = A::align(32);
+
+        if buffer.len() < aligned_offset + elem_size {
+            buffer.resize(aligned_offset + elem_size, 0);
+        }
+
+        // Data offset
+        let data_offset = aligned_offset + 32;
+        E::write::<u32>(
+            &mut buffer[aligned_offset..aligned_offset + elem_size],
+            data_offset as u32,
+        );
+
+        // encode values
+        // reserve space for headers
+        let mut value_encoder = BytesMut::zeroed(A::SIZE.max(T::HEADER_SIZE) * self.len());
+
+        for (index, obj) in self.iter().enumerate() {
+            let elem_offset = A::SIZE.max(T::HEADER_SIZE) * index;
+            obj.encode::<A, E>(&mut value_encoder, elem_offset);
+        }
+
+        write_bytes::<A, E>(buffer, aligned_offset + 4, &value_encoder.freeze());
+    }
+
+    fn decode_abi_header<A: Alignment, E: Endian>(
+        bytes: &Bytes,
+        field_offset: usize,
+    ) -> (usize, usize) {
+        let aligned_offset = A::align(field_offset);
+
+        // Read offset to data
+        let data_offset = E::read::<u32>(&bytes[aligned_offset + 28..aligned_offset + 32]) as usize;
+
+        // Read length of vector
+        let length = E::read::<u32>(&bytes[data_offset + 28..data_offset + 32]) as usize;
+
+        (data_offset + 32, length)
+    }
+
+    fn decode_abi_body<A: Alignment, E: Endian>(bytes: &Bytes, offset: usize, result: &mut Vec<T>) {
+        let (data_offset, length) = Self::decode_abi_header::<A, E>(bytes, offset);
+
+        result.clear();
+        result.reserve(length);
+
+        let mut current_offset = data_offset;
+        for _ in 0..length {
+            let mut item = T::default();
+            T::decode_body::<A, E>(bytes, current_offset, &mut item);
+            result.push(item);
+            current_offset += T::HEADER_SIZE;
+        }
+    }
+}
+
 ///
 /// We encode dynamic arrays as following:
 /// - header

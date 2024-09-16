@@ -2,6 +2,16 @@ use crate::encoder::{Alignment, Encoder, Endian};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use bytes::BytesMut;
 
+// pub fn write_bytes_abi<A: Alignment, E: Endian>(
+//     buffer: &mut BytesMut,
+//     offset: usize,
+//     bytes: &[u8],
+// ) -> usize {
+//     // length
+//     // data
+//     todo!()
+// }
+
 // Write bytes to the buffer
 // Returns the size of the header
 // To avoid resizing buffer, you can pre-allocate the buffer with the size of the header before calling this function
@@ -209,7 +219,7 @@ mod tests {
     use super::*;
     use crate::encoder::{Align0, Align1, Align32, Align4, Align8, BigEndian, LittleEndian};
     use alloy_primitives::{Address, U256};
-    use ethabi::Token;
+
     // use hex;
     // use hex_literal::hex;
 
