@@ -10,8 +10,10 @@ pub mod macros {
 
 pub mod align;
 pub mod encoder;
+pub mod evm;
 pub mod primitive;
 pub mod utils;
+pub mod vec;
 
 // mod empty;
 // mod encoder;
@@ -19,10 +21,8 @@ pub mod utils;
 // pub mod encoder;
 // pub mod encoder3;
 
-// mod evm;
 // mod hash;
 // pub mod tuple;
-// mod vec;
 
 // #[cfg(test)]
 // mod tests;

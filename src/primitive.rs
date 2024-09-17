@@ -2,13 +2,13 @@ extern crate alloc;
 
 use alloc::slice;
 
-use crate::{
-    align::{self, write_slice_aligned, WritePosition},
-    encoder::{align_offset, ByteOrderExt, Encoder, EncoderError},
+use crate::encoder::{
+    align, align_up, ByteOrderExt, CodecError, DecodingError, Encoder, EncodingError,
 };
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core::mem::MaybeUninit;
+use std::fmt::Debug;
 
 impl Encoder for u8 {
     const HEADER_SIZE: usize = 0;
@@ -16,70 +16,57 @@ impl Encoder for u8 {
 
     fn encode<B: ByteOrderExt, const ALIGN: usize>(
         &self,
-        buf: &mut impl BufMut,
+        buf: &mut BytesMut,
         offset: usize,
-    ) -> Result<(), EncoderError> {
+    ) -> Result<(), CodecError> {
         // Align the offset and header size
-        let aligned_offset = align_offset::<ALIGN>(offset);
+        let aligned_offset = align_up::<ALIGN>(offset);
 
-        // How many bytes we need to store the header and known data size
-        let aligned_size_hint = &self.size_hint::<ALIGN>();
-        println!("aligned_size_hint: {}", aligned_size_hint);
+        let word_size = align_up::<ALIGN>(ALIGN.max(Self::DATA_SIZE));
 
-        // Check if the buffer is large enough to hold the header
-        if buf.remaining_mut() < aligned_offset + aligned_size_hint {
-            return Err(EncoderError::InsufficientSpaceForHeader {
-                required: aligned_offset + aligned_size_hint,
-                available: buf.remaining_mut(),
-            });
+        if buf.len() < aligned_offset + word_size {
+            // Resize the buffer to fit the encoded data
+            buf.resize(aligned_offset + word_size, 0);
         }
 
-        // Encode the value
-
-        let write_postion = match B::is_big_endian() {
-            true => WritePosition::End,
-            false => WritePosition::Start,
-        };
-        unsafe {
-            write_slice_aligned::<ALIGN>(buf, offset, &[*self], write_postion)?;
-        }
-
+        let aligned_value = align::<B, ALIGN>(&[*self]);
+        buf[aligned_offset..aligned_offset + word_size].copy_from_slice(&aligned_value);
         Ok(())
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &mut impl Buf,
         offset: usize,
-    ) -> Result<Self, EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        if buf.remaining() < aligned_offset + ALIGN {
-            return Err(EncoderError::NotEnoughData);
+    ) -> Result<Self, CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let word_size = align_up::<ALIGN>(ALIGN.max(Self::DATA_SIZE));
+
+        if buf.remaining() < aligned_offset + word_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + word_size,
+                found: buf.remaining(),
+                msg: "buf too small to read aligned u8".to_string(),
+            }));
         }
 
-        buf.advance(aligned_offset);
-        let chunk = buf.chunk();
+        let chunk = &buf.chunk()[aligned_offset..];
         let value = if B::is_big_endian() {
-            chunk[ALIGN - 1]
+            chunk[word_size - 1]
         } else {
             chunk[0]
         };
-        buf.advance(ALIGN);
+
+        // Advance the buffer to the next offset
+        buf.advance(aligned_offset + word_size);
 
         Ok(value)
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
-        offset: usize,
-    ) -> Result<(usize, usize), EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        if buf.remaining() < aligned_offset + Self::DATA_SIZE {
-            return Err(EncoderError::NotEnoughData);
-        }
-
-        buf.advance(offset);
-
-        Ok((offset, Self::DATA_SIZE))
+        _buf: &mut impl Buf,
+        _offset: usize,
+    ) -> Result<(usize, usize), CodecError> {
+        Ok((0, Self::DATA_SIZE))
     }
 }
 
@@ -89,58 +76,31 @@ impl Encoder for bool {
 
     fn encode<B: ByteOrderExt, const ALIGN: usize>(
         &self,
-        buf: &mut impl BufMut,
+        buf: &mut BytesMut,
         offset: usize,
-    ) -> Result<(), EncoderError> {
-        let write_position = if B::is_big_endian() {
-            WritePosition::End
-        } else {
-            WritePosition::Start
-        };
+    ) -> Result<(), CodecError> {
+        let value: u8 = if *self { 1 } else { 0 };
 
-        let byte = if *self { 1u8 } else { 0u8 };
-        unsafe {
-            write_slice_aligned::<ALIGN>(buf, offset, &[byte], write_position)?;
-        }
-
-        Ok(())
+        value.encode::<B, ALIGN>(buf, offset)
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &mut impl Buf,
         offset: usize,
-    ) -> Result<Self, EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        if buf.remaining() < aligned_offset + ALIGN {
-            return Err(EncoderError::NotEnoughData);
-        }
+    ) -> Result<Self, CodecError> {
+        let value = u8::decode::<B, ALIGN>(buf, offset)?;
 
-        buf.advance(aligned_offset);
-        let chunk = buf.chunk();
-        let byte = if B::is_big_endian() {
-            chunk[ALIGN - 1]
-        } else {
-            chunk[0]
-        };
-        buf.advance(ALIGN);
-
-        Ok(byte != 0)
+        Ok(value != 0)
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        _buf: &mut impl Buf,
         offset: usize,
-    ) -> Result<(usize, usize), EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        if buf.remaining() < aligned_offset + Self::DATA_SIZE {
-            return Err(EncoderError::NotEnoughData);
-        }
-
-        buf.advance(offset);
-
+    ) -> Result<(usize, usize), CodecError> {
         Ok((offset, Self::DATA_SIZE))
     }
 }
+
 macro_rules! impl_int {
     ($typ:ty, $read_method:ident, $write_method:ident) => {
         impl Encoder for $typ {
@@ -149,57 +109,56 @@ macro_rules! impl_int {
 
             fn encode<B: ByteOrderExt, const ALIGN: usize>(
                 &self,
-                buf: &mut impl BufMut,
+                buf: &mut BytesMut,
                 offset: usize,
-            ) -> Result<(), EncoderError> {
-                let mut bytes = [0u8; Self::DATA_SIZE];
+            ) -> Result<(), CodecError> {
+                let aligned_offset = align_up::<ALIGN>(offset);
 
-                B::$write_method(&mut bytes, *self);
+                let word_size = align_up::<ALIGN>(ALIGN.max(Self::DATA_SIZE));
 
-                let write_position = if B::is_big_endian() {
-                    WritePosition::End
-                } else {
-                    WritePosition::Start
-                };
-
-                unsafe {
-                    write_slice_aligned::<ALIGN>(buf, offset, &bytes, write_position)?;
+                if buf.len() < aligned_offset + word_size {
+                    buf.resize(aligned_offset + word_size, 0);
                 }
 
+                let mut bytes = [0u8; Self::DATA_SIZE];
+                B::$write_method(&mut bytes, *self);
+
+                let aligned_value = align::<B, ALIGN>(&bytes);
+                buf[aligned_offset..aligned_offset + word_size].copy_from_slice(&aligned_value);
                 Ok(())
             }
 
             fn decode<B: ByteOrderExt, const ALIGN: usize>(
                 buf: &mut impl Buf,
                 offset: usize,
-            ) -> Result<Self, EncoderError> {
-                let aligned_offset = align_offset::<ALIGN>(offset);
+            ) -> Result<Self, CodecError> {
+                let aligned_offset = align_up::<ALIGN>(offset);
+                let word_size = align_up::<ALIGN>(ALIGN.max(Self::DATA_SIZE));
+
                 if buf.remaining() < aligned_offset + ALIGN {
-                    return Err(EncoderError::NotEnoughData);
+                    return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                        expected: aligned_offset + ALIGN,
+                        found: buf.remaining(),
+                        msg: "buf too small".to_string(),
+                    }));
                 }
 
-                buf.advance(aligned_offset);
-                let chunk = buf.chunk();
+                let chunk = &buf.chunk()[aligned_offset..];
                 let value = if B::is_big_endian() {
-                    B::$read_method(&chunk[ALIGN - Self::DATA_SIZE..ALIGN])
+                    B::$read_method(&chunk[word_size - Self::DATA_SIZE..word_size])
                 } else {
                     B::$read_method(&chunk[..Self::DATA_SIZE])
                 };
-                buf.advance(ALIGN);
+                buf.advance(aligned_offset + word_size);
 
                 Ok(value)
             }
 
             fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-                buf: &mut impl Buf,
+                _buf: &mut impl Buf,
                 offset: usize,
-            ) -> Result<(usize, usize), EncoderError> {
-                let aligned_offset = align_offset::<ALIGN>(offset);
-                if buf.remaining() < aligned_offset + Self::DATA_SIZE {
-                    return Err(EncoderError::NotEnoughData);
-                }
-
-                Ok((aligned_offset, Self::DATA_SIZE))
+            ) -> Result<(usize, usize), CodecError> {
+                Ok((offset, Self::DATA_SIZE))
             }
         }
     };
@@ -212,44 +171,39 @@ impl_int!(i16, read_i16, write_i16);
 impl_int!(i32, read_i32, write_i32);
 impl_int!(i64, read_i64, write_i64);
 
+/// Encodes and decodes Option<T> where T is an Encoder.
+/// The encoded data is prefixed with a single byte that indicates whether the Option is Some or None. Single byte will be aligned to ALIGN. So
 impl<T: Sized + Encoder + Default> Encoder for Option<T> {
     const HEADER_SIZE: usize = 1 + T::HEADER_SIZE;
     const DATA_SIZE: usize = T::DATA_SIZE;
 
     fn encode<B: ByteOrderExt, const ALIGN: usize>(
         &self,
-        buf: &mut impl BufMut,
+        buf: &mut BytesMut,
         offset: usize,
-    ) -> Result<(), EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        let aligned_header_size = align_offset::<ALIGN>(Self::HEADER_SIZE);
-        let aligned_data_size = align_offset::<ALIGN>(T::DATA_SIZE);
+    ) -> Result<(), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+        let aligned_data_size = align_up::<ALIGN>(T::DATA_SIZE);
 
         let required_space = aligned_offset + aligned_header_size + aligned_data_size;
 
-        if buf.remaining_mut() < required_space {
-            return Err(EncoderError::InsufficientSpaceForHeader {
-                required: required_space,
-                available: buf.remaining_mut(),
-            });
+        if buf.len() < required_space {
+            buf.resize(required_space, 0);
         }
 
-        let write_position = if B::is_big_endian() {
-            WritePosition::End
-        } else {
-            WritePosition::Start
-        };
-        let option_flag = if self.is_some() { 1 } else { 0 };
+        let option_flag: u8 = if self.is_some() { 1 } else { 0 };
 
-        unsafe {
-            write_slice_aligned::<ALIGN>(buf, offset, &[option_flag], write_position)?;
-        };
+        let aligned_option_flag = align::<B, ALIGN>(&[option_flag]);
+
+        buf[aligned_offset..aligned_offset + aligned_option_flag.len()]
+            .copy_from_slice(&aligned_option_flag);
 
         if let Some(inner_value) = self {
-            inner_value.encode::<B, ALIGN>(buf, aligned_offset)?;
+            inner_value.encode::<B, ALIGN>(buf, aligned_offset + aligned_option_flag.len())?;
         } else {
             let default_value = T::default();
-            default_value.encode::<B, ALIGN>(buf, aligned_offset)?;
+            default_value.encode::<B, ALIGN>(buf, aligned_offset + aligned_option_flag.len())?;
         };
         Ok(())
     }
@@ -257,21 +211,26 @@ impl<T: Sized + Encoder + Default> Encoder for Option<T> {
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &mut impl Buf,
         offset: usize,
-    ) -> Result<Self, EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        let aligned_header_size = align_offset::<ALIGN>(Self::HEADER_SIZE);
-        let aligned_data_size = align_offset::<ALIGN>(T::DATA_SIZE);
+    ) -> Result<Self, CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+        let aligned_data_size = align_up::<ALIGN>(T::DATA_SIZE);
 
         if buf.remaining() < aligned_offset + aligned_header_size + aligned_data_size {
-            return Err(EncoderError::NotEnoughData);
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + aligned_header_size + aligned_data_size,
+                msg: "buf too small".to_string(),
+                found: buf.remaining(),
+            }));
         }
 
         buf.advance(aligned_offset);
-
+        let chunk = buf.chunk();
         let option_flag = if B::is_big_endian() {
-            buf.chunk()[ALIGN - 1]
+            //
+            chunk[aligned_data_size - 1]
         } else {
-            buf.chunk()[0]
+            chunk[0]
         };
         buf.advance(ALIGN);
 
@@ -287,90 +246,57 @@ impl<T: Sized + Encoder + Default> Encoder for Option<T> {
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &mut impl Buf,
         offset: usize,
-    ) -> Result<(usize, usize), EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        if buf.remaining() < aligned_offset + Self::HEADER_SIZE {
-            return Err(EncoderError::NotEnoughData);
+    ) -> Result<(usize, usize), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+
+        if buf.remaining() < aligned_offset + aligned_header_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + aligned_header_size,
+                found: buf.remaining(),
+                msg: "buf too small".to_string(),
+            }));
         }
 
         buf.advance(aligned_offset);
-        let option_flag = buf.get_u8();
+        let chunk = buf.chunk();
+        let option_flag = if B::is_big_endian() {
+            chunk[ALIGN - 1]
+        } else {
+            chunk[0]
+        };
+        buf.advance(ALIGN);
 
         if option_flag != 0 {
             let (_, inner_size) = T::partial_decode::<B, ALIGN>(buf, 0)?;
-            Ok((aligned_offset, Self::HEADER_SIZE + inner_size))
+            Ok((aligned_offset, aligned_header_size + inner_size))
         } else {
-            Ok((aligned_offset, Self::HEADER_SIZE + T::DATA_SIZE))
+            let aligned_data_size = align_up::<ALIGN>(T::DATA_SIZE);
+            Ok((aligned_offset, aligned_header_size + aligned_data_size))
         }
     }
 }
 
-pub struct ArrayWrapper<T, const N: usize>([T; N]);
-
-impl<T: Default, const N: usize> Default for ArrayWrapper<T, N> {
-    fn default() -> Self {
-        ArrayWrapper(core::array::from_fn(|_| T::default()))
-    }
-}
-
-impl<T, const N: usize> ArrayWrapper<T, N> {
-    pub fn new(arr: [T; N]) -> Self {
-        ArrayWrapper(arr)
-    }
-
-    pub fn into_inner(self) -> [T; N] {
-        self.0
-    }
-}
-
-impl<T, const N: usize> Encoder for ArrayWrapper<T, N>
-where
-    T: Sized + Encoder + Default,
-{
+impl<T: Sized + Encoder + Default + Copy, const N: usize> Encoder for [T; N] {
     const HEADER_SIZE: usize = 0;
     const DATA_SIZE: usize = T::DATA_SIZE * N;
 
     fn encode<B: ByteOrderExt, const ALIGN: usize>(
         &self,
-        buf: &mut impl BufMut,
+        buf: &mut BytesMut,
         offset: usize,
-    ) -> Result<(), EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        let aligned_element_size = align_offset::<ALIGN>(T::DATA_SIZE);
-        let total_size = N * aligned_element_size;
+    ) -> Result<(), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let item_size = align_up::<ALIGN>(T::DATA_SIZE);
+        let total_size = aligned_offset + item_size * N;
 
-        println!("Encoding ArrayWrapper:");
-        println!("  Aligned offset: {}", aligned_offset);
-        println!("  Aligned element size: {}", aligned_element_size);
-        println!("  Total size: {}", total_size);
-        println!("  Buffer remaining: {}", buf.remaining_mut());
-
-        if buf.remaining_mut() < aligned_offset + total_size {
-            return Err(EncoderError::InsufficientSpaceForHeader {
-                required: aligned_offset + total_size,
-                available: buf.remaining_mut(),
-            });
+        if buf.len() < total_size {
+            buf.resize(total_size, 0);
         }
 
-        // Заполняем выравнивание нулями, если необходимо
-        buf.put_bytes(0, aligned_offset);
-
-        for (i, item) in self.0.iter().enumerate() {
-            println!(
-                "Encoding item {} at offset {}",
-                i,
-                aligned_offset + i * aligned_element_size
-            );
-            item.encode::<B, ALIGN>(buf, 0)?;
-
-            // Добавляем padding после каждого элемента, если необходимо
-            let padding = aligned_element_size - T::DATA_SIZE;
-            if padding > 0 {
-                buf.put_bytes(0, padding);
-            }
+        for (i, item) in self.iter().enumerate() {
+            item.encode::<B, ALIGN>(buf, aligned_offset + i * item_size)?;
         }
-
-        println!("Encoding completed. Buffer size: {}", buf.remaining_mut());
 
         Ok(())
     }
@@ -378,51 +304,43 @@ where
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &mut impl Buf,
         offset: usize,
-    ) -> Result<Self, EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        let aligned_element_size = align_offset::<ALIGN>(T::DATA_SIZE);
-        let total_size = N * aligned_element_size;
+    ) -> Result<Self, CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let item_size = align_up::<ALIGN>(T::DATA_SIZE);
+        let total_size = aligned_offset + item_size * N;
 
-        println!("Decoding ArrayWrapper:");
-        println!("  Aligned offset: {}", aligned_offset);
-        println!("  Aligned element size: {}", aligned_element_size);
-        println!("  Total size: {}", total_size);
-        println!("  Buffer remaining: {}", buf.remaining());
-
-        if buf.remaining() < aligned_offset + total_size {
-            return Err(EncoderError::NotEnoughData);
+        if buf.remaining() < total_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: total_size,
+                found: buf.remaining(),
+                msg: "buf too small".to_string(),
+            }));
         }
 
-        buf.advance(aligned_offset);
+        let mut result = [T::default(); N];
 
-        let result = core::array::from_fn(|i| {
-            println!("Decoding item {} at offset {}", i, i * aligned_element_size);
-            let decoded = T::decode::<B, ALIGN>(buf, 0).unwrap_or_else(|_| T::default());
+        for item in result.iter_mut() {
+            // Offset is always 0 - we are advancing the buffer by reading the item
+            *item = T::decode::<B, ALIGN>(buf, 0)?;
+        }
 
-            // Пропускаем padding после каждого элемента, если есть
-            let padding = aligned_element_size - T::DATA_SIZE;
-            if padding > 0 {
-                buf.advance(padding);
-            }
-
-            decoded
-        });
-
-        println!("Decoding completed. Buffer remaining: {}", buf.remaining());
-
-        Ok(ArrayWrapper(result))
+        Ok(result)
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &mut impl Buf,
         offset: usize,
-    ) -> Result<(usize, usize), EncoderError> {
-        let aligned_offset = align_offset::<ALIGN>(offset);
-        let aligned_element_size = align_offset::<ALIGN>(T::DATA_SIZE);
-        let total_size = N * aligned_element_size;
+    ) -> Result<(usize, usize), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let item_size = align_up::<ALIGN>(T::DATA_SIZE);
+        let total_size = item_size * N;
 
         if buf.remaining() < aligned_offset + total_size {
-            return Err(EncoderError::NotEnoughData);
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + total_size,
+                found: buf.remaining(),
+                msg: "Buffer too small to decode array".to_string(),
+            }));
         }
 
         Ok((aligned_offset, total_size))
@@ -439,18 +357,21 @@ mod tests {
     use bytes::{BufMut, BytesMut};
 
     #[test]
-    fn test_u8_encode_decode() {
+    fn test_u8_be_encode_decode() {
         let original: u8 = 1;
-        let mut buffer = BytesMut::with_capacity(32);
+        const ALIGNMENT: usize = 32;
+
+        let mut buffer = BytesMut::zeroed(ALIGNMENT);
 
         println!("Buffer capacity: {}", buffer.capacity());
 
-        let is_ok = original.encode::<BigEndian, 32>(&mut buffer, 0);
-        assert!(is_ok.is_ok());
+        let encoding_result = original.encode::<BigEndian, ALIGNMENT>(&mut buffer, 0);
 
-        print_buffer_debug(&buffer, 0);
+        assert!(encoding_result.is_ok());
 
-        println!("{:?}", hex::encode(&buffer));
+        let expected_encoded = "0000000000000000000000000000000000000000000000000000000000000001";
+
+        assert_eq!(hex::encode(&buffer), expected_encoded);
 
         let mut buf_for_decode = buffer.clone().freeze();
         let decoded = u8::decode::<BigEndian, 32>(&mut buf_for_decode, 0).unwrap();
@@ -462,30 +383,96 @@ mod tests {
             u8::partial_decode::<BigEndian, 32>(&mut buffer.clone().freeze(), 0).unwrap();
         assert_eq!(partial_decoded, (0, 1));
     }
-
     #[test]
-    fn test_bool_encode_decode_align8() {
-        let original = true;
-        let mut buffer = BytesMut::with_capacity(8);
+    fn test_u8_le_encode_decode() {
+        let original: u8 = 1;
+        const ALIGNMENT: usize = 32;
+        let mut buffer = BytesMut::zeroed(ALIGNMENT);
 
-        original.encode::<LittleEndian, 8>(&mut buffer, 0).unwrap();
+        println!("Buffer capacity: {}", buffer.capacity());
 
-        assert_eq!(buffer.to_vec(), vec![1, 0, 0, 0, 0, 0, 0, 0]);
+        let encoding_result = original.encode::<LittleEndian, ALIGNMENT>(&mut buffer, 0);
 
-        let mut buf_for_decode = buffer.clone().freeze();
-        let decoded = bool::decode::<LittleEndian, 8>(&mut buf_for_decode, 0).unwrap();
+        assert!(encoding_result.is_ok());
+
+        let expected_encoded = "0100000000000000000000000000000000000000000000000000000000000000";
+
+        let mut encoded = buffer.freeze();
+        println!("Encoded: {:?}", encoded);
+        assert_eq!(hex::encode(&encoded), expected_encoded);
+
+        let decoded = u8::decode::<LittleEndian, 32>(&mut encoded, 0).unwrap();
+        println!("Decoded: {}", decoded);
 
         assert_eq!(original, decoded);
+
+        let partial_decoded = u8::partial_decode::<LittleEndian, 32>(&mut encoded, 0).unwrap();
+
+        assert_eq!(partial_decoded, (0, 1));
+    }
+    #[test]
+    fn test_bool_be_encode_decode() {
+        let original: bool = true;
+        const ALIGNMENT: usize = 32;
+
+        let mut buffer = BytesMut::zeroed(ALIGNMENT);
+
+        println!("Buffer capacity: {}", buffer.capacity());
+
+        let encoding_result = original.encode::<BigEndian, ALIGNMENT>(&mut buffer, 0);
+
+        assert!(encoding_result.is_ok());
+
+        let expected_encoded = "0000000000000000000000000000000000000000000000000000000000000001";
+
+        assert_eq!(hex::encode(&buffer), expected_encoded);
+
+        let mut buf_for_decode = buffer.clone().freeze();
+        let decoded = bool::decode::<BigEndian, 32>(&mut buf_for_decode, 0).unwrap();
+
+        assert_eq!(original, decoded);
+        println!("encoded: {:?}", buffer);
+
+        let partial_decoded =
+            bool::partial_decode::<BigEndian, 32>(&mut buffer.clone().freeze(), 0).unwrap();
+        assert_eq!(partial_decoded, (0, 1));
+    }
+    #[test]
+    fn test_bool_le_encode_decode() {
+        let original: bool = true;
+        const ALIGNMENT: usize = 32;
+        let mut buffer = BytesMut::zeroed(ALIGNMENT);
+
+        println!("Buffer capacity: {}", buffer.capacity());
+
+        let encoding_result = original.encode::<LittleEndian, ALIGNMENT>(&mut buffer, 0);
+
+        assert!(encoding_result.is_ok());
+
+        let expected_encoded = "0100000000000000000000000000000000000000000000000000000000000000";
+
+        let mut encoded = buffer.freeze();
+        println!("Encoded: {:?}", encoded);
+        assert_eq!(hex::encode(&encoded), expected_encoded);
+
+        let decoded = bool::decode::<LittleEndian, 32>(&mut encoded, 0).unwrap();
+        println!("Decoded: {}", decoded);
+
+        assert_eq!(original, decoded);
+
+        let partial_decoded = u8::partial_decode::<LittleEndian, 32>(&mut encoded, 0).unwrap();
+
+        assert_eq!(partial_decoded, (0, 1));
     }
 
     #[test]
     fn test_u32_encode_decode_le() {
         let original: u32 = 0x12345678;
-        let mut buffer = BytesMut::with_capacity(4);
+        let mut buffer = BytesMut::new();
 
-        original.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
+        original.encode::<LittleEndian, 8>(&mut buffer, 0).unwrap();
 
-        assert_eq!(buffer.to_vec(), vec![0x78, 0x56, 0x34, 0x12]);
+        assert_eq!(buffer.to_vec(), vec![0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0]);
 
         let mut buf_for_decode = buffer.clone().freeze();
         let decoded = u32::decode::<LittleEndian, 4>(&mut buf_for_decode, 0).unwrap();
@@ -494,32 +481,40 @@ mod tests {
     }
 
     #[test]
-    fn test_u64_encode_decode_be() {
-        let original: u64 = 0x1234567890ABCDEF;
-        let mut buffer = BytesMut::with_capacity(8);
+    fn test_u32_encode_decode_be() {
+        let original: u32 = 0x12345678;
+        let mut buffer = BytesMut::new();
 
         original.encode::<BigEndian, 8>(&mut buffer, 0).unwrap();
 
+        let mut encoded = buffer.freeze();
+        println!("{:?}", hex::encode(&encoded));
         assert_eq!(
-            buffer.to_vec(),
-            vec![0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF]
+            &encoded,
+            &vec![0x00, 0x00, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78]
         );
 
-        let mut buf_for_decode = buffer.clone().freeze();
-        let decoded = u64::decode::<BigEndian, 8>(&mut buf_for_decode, 0).unwrap();
+        let decoded = u32::decode::<BigEndian, 8>(&mut encoded, 0).unwrap();
+        println!("Decoded: {}", decoded);
 
         assert_eq!(original, decoded);
     }
-
     #[test]
-    fn test_i32_encode_decode_le() {
-        let original: i32 = -123456;
-        let mut buffer = BytesMut::with_capacity(4);
+    fn test_i64_encode_decode_be() {
+        let original: i64 = 0x1234567890ABCDEF;
+        let mut buffer = BytesMut::new();
 
-        original.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
+        original.encode::<BigEndian, 8>(&mut buffer, 0).unwrap();
 
-        let mut buf_for_decode = buffer.clone().freeze();
-        let decoded = i32::decode::<LittleEndian, 4>(&mut buf_for_decode, 0).unwrap();
+        let mut encoded = buffer.freeze();
+        println!("Encoded: {:?}", hex::encode(&encoded));
+        assert_eq!(
+            &encoded,
+            &vec![0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF]
+        );
+
+        let decoded = i64::decode::<BigEndian, 8>(&mut encoded, 0).unwrap();
+        println!("Decoded: {}", decoded);
 
         assert_eq!(original, decoded);
     }
@@ -533,9 +528,10 @@ mod tests {
         assert!(ok.is_ok());
 
         let mut encoded = buffer.freeze();
+        println!("Encoded: {:?}", &encoded.to_vec());
         assert_eq!(
             encoded,
-            Bytes::from_static(&[1, 0x00, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12])
+            Bytes::from_static(&[0x01, 0x00, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12])
         );
 
         let decoded = Option::<u32>::decode::<LittleEndian, 4>(&mut encoded, 0);
@@ -544,45 +540,66 @@ mod tests {
     }
 
     #[test]
-    fn test_array_wrapper_u16_encode_decode() {
-        let original = ArrayWrapper::new([0x1234u16, 0x5678u16, 0x9ABCu16]);
-        const ALIGNMENT: usize = 2;
+    fn test_u8_array_encode_decode_le_with_alignment() {
+        let original: [u8; 5] = [1, 2, 3, 4, 5];
+        let mut buffer = BytesMut::new();
 
-        println!("Original array: {:?}", original.0);
-        println!("Size hint: {}", original.size_hint::<ALIGNMENT>());
-        let mut buffer = BytesMut::with_capacity(original.size_hint::<ALIGNMENT>());
-        println!("Buffer capacity: {}", buffer.capacity());
+        original.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
 
-        original
-            .encode::<BigEndian, ALIGNMENT>(&mut buffer, 0)
-            .unwrap();
+        let mut encoded = buffer.freeze();
+        println!("Encoded: {:?}", hex::encode(&encoded));
 
-        println!("Encoded buffer:");
-        print_buffer_debug(&buffer, 0);
-
-        assert_eq!(buffer.len(), 6, "Buffer length should be 6");
-
-        let expected = vec![0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC];
+        // Check that the encoded data is correct and properly aligned
         assert_eq!(
-            buffer.to_vec(),
-            expected,
-            "Encoded data does not match expected values. Expected: {:?}, Got: {:?}",
-            expected,
-            buffer.to_vec()
+            &encoded.to_vec(),
+            &[
+                0x01, 0x00, 0x00, 0x00, // First byte aligned to 4 bytes
+                0x02, 0x00, 0x00, 0x00, // Second byte aligned to 4 bytes
+                0x03, 0x00, 0x00, 0x00, // Third byte aligned to 4 bytes
+                0x04, 0x00, 0x00, 0x00, // Fourth byte aligned to 4 bytes
+                0x05, 0x00, 0x00, 0x00 // Fifth byte aligned to 4 bytes
+            ]
         );
 
-        let mut buf_for_decode = buffer.freeze();
-        println!("Buffer for decode: {:?}", buf_for_decode);
+        println!("Encoded: {:?}", encoded.to_vec());
+        println!("encoded len: {}", encoded.len());
+        let decoded = <[u8; 5]>::decode::<LittleEndian, 4>(&mut encoded, 0).unwrap();
+        println!("Decoded: {:?}", decoded);
 
-        let decoded =
-            ArrayWrapper::<u16, 3>::decode::<BigEndian, ALIGNMENT>(&mut buf_for_decode, 0).unwrap();
+        assert_eq!(original, decoded);
+    }
+    #[test]
+    fn test_u32_array_encode_decode_le_with_alignment() {
+        let original: [u32; 5] = [1, 2, 3, 4, 5];
+        let mut buffer = BytesMut::new();
 
-        println!("Decoded array: {:?}", decoded.0);
+        original.encode::<LittleEndian, 8>(&mut buffer, 0).unwrap();
 
+        let mut encoded = buffer.freeze();
+        println!("Encoded: {:?}", hex::encode(&encoded));
+
+        // Check that the encoded data is correct and properly aligned
         assert_eq!(
-            original.into_inner(),
-            decoded.into_inner(),
-            "Decoded array does not match original"
+            &encoded.to_vec(),
+            &[
+                0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, // First u32 aligned to 8 bytes
+                0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, // Second u32 aligned to 8 bytes
+                0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, // Third u32 aligned to 8 bytes
+                0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, // Fourth u32 aligned to 8 bytes
+                0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00 // Fifth u32 aligned to 8 bytes
+            ]
         );
+
+        println!("Encoded: {:?}", encoded.to_vec());
+        println!("encoded len: {}", encoded.len());
+        let decoded = <[u32; 5]>::decode::<LittleEndian, 8>(&mut encoded, 0).unwrap();
+        println!("Decoded: {:?}", decoded);
+
+        assert_eq!(original, decoded);
     }
 }

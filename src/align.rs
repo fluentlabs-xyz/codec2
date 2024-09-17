@@ -28,7 +28,7 @@ pub unsafe fn write_slice_aligned<const ALIGN: usize>(
     dest_buf: &mut impl BufMut,
     write_offset: usize,
     src_slice: &[u8],
-    write_position: WritePosition,
+    write_position: &WritePosition,
 ) -> Result<(), EncoderError> {
     // Align the buffer offset
     let aligned_offset = align_offset::<ALIGN>(write_offset);
@@ -120,7 +120,7 @@ mod tests {
 
         print_buffer_debug(&buffer, 0);
         unsafe {
-            write_slice_aligned::<8>(&mut buffer, 8, &value_le, WritePosition::Start).unwrap();
+            write_slice_aligned::<8>(&mut buffer, 8, &value_le, &WritePosition::Start).unwrap();
         }
 
         print_buffer_debug(&buffer, 0);
@@ -138,7 +138,7 @@ mod tests {
         let value: u32 = 0x12345678;
 
         unsafe {
-            write_slice_aligned::<8>(&mut buffer, 4, &value.to_be_bytes(), WritePosition::End)
+            write_slice_aligned::<8>(&mut buffer, 4, &value.to_be_bytes(), &WritePosition::End)
                 .unwrap();
         }
 
