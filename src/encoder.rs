@@ -1,5 +1,5 @@
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use thiserror::Error;
 
@@ -47,7 +47,11 @@ pub enum DecodingError {
     InvalidData(String),
 
     #[error("Not enough data in the buffer: expected at least {expected} bytes, found {found}")]
-    BufferTooSmall { expected: usize, found: usize },
+    BufferTooSmall {
+        expected: usize,
+        found: usize,
+        msg: String,
+    },
 
     #[error("Unexpected end of buffer")]
     UnexpectedEof,
@@ -62,7 +66,7 @@ pub enum DecodingError {
 // the default value is not required before the actual decoding takes place.
 // Consider benchmarking both approaches to measure performance differences.
 
-pub trait Encoder: Sized + Default {
+pub trait Encoder: Sized {
     /// Header used to save metadata about the encoded value.
     const HEADER_SIZE: usize;
 
@@ -72,8 +76,7 @@ pub trait Encoder: Sized + Default {
     /// How many bytes we should allocate for the encoded value.
     /// This is the sum of the header size and the known data size.
     fn size_hint<const ALIGN: usize>(&self) -> usize {
-        round_up_to_alignment::<ALIGN>(Self::HEADER_SIZE)
-            + round_up_to_alignment::<ALIGN>(Self::DATA_SIZE)
+        align_up::<ALIGN>(Self::HEADER_SIZE) + align_up::<ALIGN>(Self::DATA_SIZE)
     }
 
     /// Encodes the value into the given buffer at the specified offset. The buffer must be large enough to hold at least `align(offset) + Self::HEADER_SIZE` bytes.
@@ -117,6 +120,8 @@ pub trait Encoder: Sized + Default {
     /// # Returns
     ///
     /// Returns a tuple of `(offset, data_length)` if successful, or an `EncoderError` if there was a problem.
+    ///
+    /// For primitive types, the header size is 0, so the offset is returned as-is.
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &mut impl Buf,
         offset: usize,
@@ -126,6 +131,61 @@ pub trait Encoder: Sized + Default {
 /// Rounds up the given offset to the nearest multiple of ALIGN.
 /// ALIGN must be a power of two.
 #[inline]
-pub const fn round_up_to_alignment<const ALIGN: usize>(offset: usize) -> usize {
+pub const fn align_up<const ALIGN: usize>(offset: usize) -> usize {
     (offset + ALIGN - 1) & !(ALIGN - 1)
+}
+
+/// Aligns the source bytes to the specified alignment.
+pub fn align<B: ByteOrderExt, const ALIGN: usize>(src: &[u8]) -> Bytes {
+    let aligned_src_len = align_up::<ALIGN>(src.len());
+    let aligned_total_size = aligned_src_len.max(ALIGN);
+    let mut aligned = BytesMut::zeroed(aligned_total_size);
+
+    if B::is_big_endian() {
+        // For big-endian, copy to the end of the aligned array
+        let start = aligned_total_size - src.len();
+        aligned[start..].copy_from_slice(src);
+    } else {
+        // For little-endian, copy to the start of the aligned array
+        aligned[..src.len()].copy_from_slice(src);
+    }
+
+    aligned.freeze()
+}
+
+pub fn write_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
+    buffer: &mut BytesMut,
+    offset: usize,
+    value: u32,
+) {
+    let aligned_value_size = align_up::<ALIGN>(4);
+
+    if buffer.len() < offset + aligned_value_size {
+        buffer.resize(offset + aligned_value_size, 0);
+    }
+
+    if B::is_big_endian() {
+        // For big-endian, copy to the end of the aligned array
+        let start = offset + aligned_value_size - 4;
+        B::write_u32(&mut buffer[start..], value);
+    } else {
+        // For little-endian, copy to the start of the aligned array
+        B::write_u32(&mut buffer[offset..offset + 4], value);
+    }
+}
+
+pub fn read_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
+    buffer: &mut impl Buf,
+    offset: usize,
+) -> u32 {
+    let aligned_value_size = align_up::<ALIGN>(4);
+
+    if B::is_big_endian() {
+        // For big-endian, copy from the end of the aligned array
+        let start = offset + aligned_value_size - 4;
+        B::read_u32(&buffer.chunk()[start..])
+    } else {
+        // For little-endian, copy from the start of the aligned array
+        B::read_u32(&buffer.chunk()[offset..offset + 4])
+    }
 }

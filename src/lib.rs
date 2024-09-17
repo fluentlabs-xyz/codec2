@@ -8,7 +8,6 @@ pub mod macros {
     pub use prettytable::table;
 }
 
-pub mod align;
 pub mod encoder;
 pub mod evm;
 pub mod primitive;
