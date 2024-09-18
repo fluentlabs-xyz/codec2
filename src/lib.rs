@@ -8,13 +8,13 @@ pub mod macros {
     pub use prettytable::table;
 }
 
+pub mod empty;
 pub mod encoder;
 pub mod evm;
 pub mod primitive;
 pub mod utils;
 pub mod vec;
 
-// mod empty;
 // mod encoder;
 
 // pub mod encoder;

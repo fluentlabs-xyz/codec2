@@ -1,88 +1,161 @@
-use crate::{
-    encoder::{Alignment, Encoder, Endian},
-    evm::{read_bytes_header, write_bytes},
-};
-use bytes::{Bytes, BytesMut};
+use crate::encoder::{align_up, read_u32_aligned, write_u32_aligned};
+use crate::encoder::{ByteOrderExt, CodecError, DecodingError, Encoder};
+use crate::evm::read_bytes_header;
+use bytes::{Buf, BytesMut};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct EmptyVec;
 
-impl Encoder<EmptyVec> for EmptyVec {
-    const HEADER_SIZE: usize = 12;
+impl Encoder for EmptyVec {
+    const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3; // 12 bytes
+    const DATA_SIZE: usize = 0;
 
-    fn encode<A: Alignment, E: Endian>(&self, buffer: &mut BytesMut, offset: usize) {
-        let aligned_offset = A::align(offset);
+    fn encode<B: ByteOrderExt, const ALIGN: usize>(
+        &self,
+        buf: &mut BytesMut,
+        offset: usize,
+    ) -> Result<(), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_elem_size = align_up::<ALIGN>(4);
 
-        if buffer.len() < aligned_offset + Self::HEADER_SIZE {
-            buffer.resize(aligned_offset + Self::HEADER_SIZE, 0);
-        };
-        E::write::<u32>(&mut buffer[aligned_offset..aligned_offset + 4], 0);
+        // Write number of elements (0 for EmptyVec)
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, 0);
 
-        write_bytes::<A, E>(buffer, aligned_offset + 4, &[]);
+        // Write offset and length (both 0 for EmptyVec)
+        write_u32_aligned::<B, ALIGN>(
+            buf,
+            aligned_offset + aligned_elem_size,
+            (aligned_elem_size * 3) as u32,
+        );
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2, 0);
+
+        Ok(())
     }
 
-    fn decode_header<A: Alignment, E: Endian>(
-        bytes: &Bytes,
+    fn decode<B: ByteOrderExt, const ALIGN: usize>(
+        buf: &mut impl Buf,
         offset: usize,
-        _result: &mut EmptyVec,
-    ) -> (usize, usize) {
-        let aligned_offset = A::align(offset);
+    ) -> Result<Self, CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_elem_size = align_up::<ALIGN>(4);
 
-        // TODO: d1r1 maybe we should return an error here?
-        if bytes.len() < aligned_offset + 4 {
-            return (0, 0);
+        if buf.remaining() < aligned_offset + Self::HEADER_SIZE {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + Self::HEADER_SIZE,
+                found: buf.remaining(),
+                msg: "failed to decode EmptyVec".to_string(),
+            }));
         }
 
-        let count = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
-        debug_assert_eq!(count, 0);
-        read_bytes_header::<A, E>(bytes, aligned_offset + 4)
+        let count = read_u32_aligned::<B, ALIGN>(buf, aligned_offset);
+        if count != 0 {
+            return Err(CodecError::Decoding(DecodingError::InvalidData(
+                "EmptyVec must have count of 0".to_string(),
+            )));
+        }
+
+        // Read and verify offset and length
+        let data_offset =
+            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size) as usize;
+        let data_length =
+            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2) as usize;
+
+        if data_offset != Self::HEADER_SIZE || data_length != 0 {
+            return Err(CodecError::Decoding(DecodingError::InvalidData(
+                "Invalid offset or length for EmptyVec".to_string(),
+            )));
+        }
+
+        Ok(EmptyVec)
+    }
+
+    fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+        buf: &mut impl Buf,
+        offset: usize,
+    ) -> Result<(usize, usize), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_elem_size = align_up::<ALIGN>(4);
+
+        if buf.remaining() < aligned_offset + Self::HEADER_SIZE {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + Self::HEADER_SIZE,
+                found: buf.remaining(),
+                msg: "failed to partially decode EmptyVec".to_string(),
+            }));
+        }
+
+        let count = read_u32_aligned::<B, ALIGN>(buf, aligned_offset);
+        if count != 0 {
+            return Err(CodecError::Decoding(DecodingError::InvalidData(
+                "EmptyVec must have count of 0".to_string(),
+            )));
+        }
+
+        let data_offset =
+            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size) as usize;
+        let data_length =
+            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2) as usize;
+
+        Ok((data_offset, data_length))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::encoder::{Align0, LittleEndian};
+    use byteorder::{BigEndian, LittleEndian};
 
     use super::*;
 
     #[test]
-    fn test_empty() {
-        let values = EmptyVec;
-
+    fn test_empty_vec_little_endian() {
+        let empty_vec = EmptyVec;
         let mut buffer = BytesMut::new();
-        values.encode::<Align0, LittleEndian>(&mut buffer, 0);
+        empty_vec.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
 
-        let encoded = buffer.freeze();
-        println!("encoded = {:?}", hex::encode(&encoded));
-        let expected = "000000000c00000000000000";
-        assert_eq!(hex::encode(&encoded), expected);
+        let mut encoded = buffer.freeze();
+        assert_eq!(hex::encode(&encoded), "000000000c00000000000000");
 
-        let mut decoded = Default::default();
-        EmptyVec::decode_body::<Align0, LittleEndian>(&encoded, 0, &mut decoded);
+        let decoded = EmptyVec::decode::<LittleEndian, 4>(&mut encoded.clone(), 0).unwrap();
+        assert_eq!(empty_vec, decoded);
 
-        assert_eq!(values, decoded);
+        let (offset, length) =
+            EmptyVec::partial_decode::<LittleEndian, 4>(&mut encoded, 0).unwrap();
+        assert_eq!(offset, 12);
+        assert_eq!(length, 0);
     }
 
     #[test]
-    fn test_empty_with_offset() {
-        let values = EmptyVec;
-        let mut buffer = BytesMut::from(&[0xFF, 0xFF, 0xFF][..]);
-        values.encode::<Align0, LittleEndian>(&mut buffer, 3);
+    fn test_empty_vec_big_endian() {
+        let empty_vec = EmptyVec;
+        let mut buffer = BytesMut::new();
+        empty_vec.encode::<BigEndian, 4>(&mut buffer, 0).unwrap();
 
-        let expected = "ffffff000000000f00000000000000";
-        let encoded = buffer.freeze();
-        println!("encoded = {:?}", hex::encode(&encoded));
-        assert_eq!(hex::encode(&encoded), expected);
+        let mut encoded = buffer.freeze();
+        assert_eq!(hex::encode(&encoded), "000000000000000c00000000");
 
-        let mut decoded = Default::default();
-        let (offset, length) =
-            EmptyVec::decode_header::<Align0, LittleEndian>(&encoded, 3, &mut decoded);
-        assert_eq!(offset, 15);
+        let decoded = EmptyVec::decode::<BigEndian, 4>(&mut encoded.clone(), 0).unwrap();
+        assert_eq!(empty_vec, decoded);
+
+        let (offset, length) = EmptyVec::partial_decode::<BigEndian, 4>(&mut encoded, 0).unwrap();
+        assert_eq!(offset, 12);
         assert_eq!(length, 0);
+    }
 
-        let mut decoded = Default::default();
+    #[test]
+    fn test_empty_vec_with_offset() {
+        let empty_vec = EmptyVec;
+        let mut buffer = BytesMut::from(&[0xFF, 0xFF, 0xFF][..]);
+        empty_vec.encode::<LittleEndian, 4>(&mut buffer, 3).unwrap();
 
-        EmptyVec::decode_body::<Align0, LittleEndian>(&encoded, 3, &mut decoded);
-        assert_eq!(values, decoded);
+        let mut encoded = buffer.freeze();
+        assert_eq!(hex::encode(&encoded), "ffffff00000000000c00000000000000");
+
+        let decoded = EmptyVec::decode::<LittleEndian, 4>(&mut encoded.clone(), 3).unwrap();
+        assert_eq!(empty_vec, decoded);
+
+        let (offset, length) =
+            EmptyVec::partial_decode::<LittleEndian, 4>(&mut encoded, 3).unwrap();
+        assert_eq!(offset, 12);
+        assert_eq!(length, 0);
     }
 }
