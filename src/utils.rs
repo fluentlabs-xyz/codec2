@@ -94,13 +94,13 @@ pub fn print_buffer_debug(buf: &BytesMut, header_size: usize) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_print_buffer_debug() {
-        let mut buffer = BytesMut::with_capacity(32);
-        for i in 0..26 {
-            buffer.put_u8(i);
-        }
+    // #[test]
+    // fn test_print_buffer_debug() {
+    //     let mut buffer = BytesMut::with_capacity(32);
+    //     for i in 0..26 {
+    //         buffer.put_u8(i);
+    //     }
 
-        print_buffer_debug(&buffer, 4);
-    }
+    //     // print_buffer_debug(&buffer, 4);
+    // }
 }

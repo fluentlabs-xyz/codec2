@@ -33,7 +33,7 @@ impl Encoder for EmptyVec {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -70,7 +70,7 @@ impl Encoder for EmptyVec {
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);

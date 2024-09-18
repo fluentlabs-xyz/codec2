@@ -12,16 +12,11 @@ pub mod empty;
 pub mod encoder;
 pub mod evm;
 pub mod primitive;
+pub mod tuple;
 pub mod utils;
 pub mod vec;
 
-// mod encoder;
-
-// pub mod encoder;
-// pub mod encoder3;
-
 // mod hash;
-// pub mod tuple;
 
 // #[cfg(test)]
 // mod tests;

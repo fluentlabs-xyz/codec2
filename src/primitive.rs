@@ -35,7 +35,7 @@ impl Encoder for u8 {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -56,14 +56,11 @@ impl Encoder for u8 {
             chunk[0]
         };
 
-        // Advance the buffer to the next offset
-        buf.advance(aligned_offset + word_size);
-
         Ok(value)
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        _buf: &mut impl Buf,
+        _buf: &impl Buf,
         _offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         Ok((0, Self::DATA_SIZE))
@@ -85,7 +82,7 @@ impl Encoder for bool {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let value = u8::decode::<B, ALIGN>(buf, offset)?;
@@ -94,7 +91,7 @@ impl Encoder for bool {
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        _buf: &mut impl Buf,
+        _buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         Ok((offset, Self::DATA_SIZE))
@@ -129,7 +126,7 @@ macro_rules! impl_int {
             }
 
             fn decode<B: ByteOrderExt, const ALIGN: usize>(
-                buf: &mut impl Buf,
+                buf: &impl Buf,
                 offset: usize,
             ) -> Result<Self, CodecError> {
                 let aligned_offset = align_up::<ALIGN>(offset);
@@ -149,13 +146,13 @@ macro_rules! impl_int {
                 } else {
                     B::$read_method(&chunk[..Self::DATA_SIZE])
                 };
-                buf.advance(aligned_offset + word_size);
+                // buf.advance(aligned_offset + word_size);
 
                 Ok(value)
             }
 
             fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-                _buf: &mut impl Buf,
+                _buf: &impl Buf,
                 offset: usize,
             ) -> Result<(usize, usize), CodecError> {
                 Ok((offset, Self::DATA_SIZE))
@@ -209,7 +206,7 @@ impl<T: Sized + Encoder + Default> Encoder for Option<T> {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -224,27 +221,26 @@ impl<T: Sized + Encoder + Default> Encoder for Option<T> {
             }));
         }
 
-        buf.advance(aligned_offset);
-        let chunk = buf.chunk();
+        let chunk = &buf.chunk()[aligned_offset..];
         let option_flag = if B::is_big_endian() {
             //
             chunk[aligned_data_size - 1]
         } else {
             chunk[0]
         };
-        buf.advance(ALIGN);
+
+        let chunk = &buf.chunk()[aligned_offset + ALIGN..];
 
         if option_flag != 0 {
-            let inner_value = T::decode::<B, ALIGN>(buf, 0)?;
+            let inner_value = T::decode::<B, ALIGN>(&chunk, 0)?;
             Ok(Some(inner_value))
         } else {
-            buf.advance(aligned_data_size);
             Ok(None)
         }
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -258,17 +254,17 @@ impl<T: Sized + Encoder + Default> Encoder for Option<T> {
             }));
         }
 
-        buf.advance(aligned_offset);
-        let chunk = buf.chunk();
+        let chunk = &buf.chunk()[aligned_offset..];
         let option_flag = if B::is_big_endian() {
             chunk[ALIGN - 1]
         } else {
             chunk[0]
         };
-        buf.advance(ALIGN);
+
+        let chunk = &buf.chunk()[aligned_offset + ALIGN..];
 
         if option_flag != 0 {
-            let (_, inner_size) = T::partial_decode::<B, ALIGN>(buf, 0)?;
+            let (_, inner_size) = T::partial_decode::<B, ALIGN>(&chunk, 0)?;
             Ok((aligned_offset, aligned_header_size + inner_size))
         } else {
             let aligned_data_size = align_up::<ALIGN>(T::DATA_SIZE);
@@ -302,7 +298,7 @@ impl<T: Sized + Encoder + Default + Copy, const N: usize> Encoder for [T; N] {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -318,17 +314,18 @@ impl<T: Sized + Encoder + Default + Copy, const N: usize> Encoder for [T; N] {
         }
 
         let mut result = [T::default(); N];
+        let elem_size = align_up::<ALIGN>(T::HEADER_SIZE + T::DATA_SIZE);
 
-        for item in result.iter_mut() {
+        for (i, item) in result.iter_mut().enumerate() {
             // Offset is always 0 - we are advancing the buffer by reading the item
-            *item = T::decode::<B, ALIGN>(buf, 0)?;
+            *item = T::decode::<B, ALIGN>(buf, i * elem_size)?;
         }
 
         Ok(result)
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);

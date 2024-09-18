@@ -46,10 +46,7 @@ pub fn write_bytes<B: ByteOrderExt, const ALIGN: usize>(
     aligned_header_size
 }
 
-pub fn read_bytes<B: ByteOrderExt, const ALIGN: usize>(
-    buffer: &mut impl Buf,
-    offset: usize,
-) -> Bytes {
+pub fn read_bytes<B: ByteOrderExt, const ALIGN: usize>(buffer: &impl Buf, offset: usize) -> Bytes {
     let (data_offset, data_len) = read_bytes_header::<B, ALIGN>(buffer, offset);
 
     let data = buffer.chunk()[data_offset..data_offset + data_len].to_vec();
@@ -58,7 +55,7 @@ pub fn read_bytes<B: ByteOrderExt, const ALIGN: usize>(
 }
 
 pub fn read_bytes_header<B: ByteOrderExt, const ALIGN: usize>(
-    buffer: &mut impl Buf,
+    buffer: &impl Buf,
     offset: usize,
 ) -> (usize, usize) {
     let aligned_offset = align_up::<ALIGN>(offset);
@@ -85,14 +82,14 @@ impl Encoder for Bytes {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buffer: &mut impl Buf,
+        buffer: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         Ok(read_bytes::<B, ALIGN>(buffer, offset))
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         Ok(read_bytes_header::<B, ALIGN>(buf, offset))
@@ -116,7 +113,7 @@ impl<const N: usize> Encoder for FixedBytes<N> {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buffer: &mut impl Buf,
+        buffer: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let data = buffer.chunk()[offset..offset + N].to_vec();
@@ -124,7 +121,7 @@ impl<const N: usize> Encoder for FixedBytes<N> {
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        _buffer: &mut impl Buf,
+        _buffer: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         Ok((offset, N))
@@ -146,7 +143,7 @@ macro_rules! impl_evm_fixed {
             }
 
             fn decode<B: ByteOrderExt, const ALIGN: usize>(
-                buffer: &mut impl Buf,
+                buffer: &impl Buf,
                 offset: usize,
             ) -> Result<Self, CodecError> {
                 let inner = FixedBytes::<{ Self::DATA_SIZE }>::decode::<B, ALIGN>(buffer, offset)?;
@@ -154,7 +151,7 @@ macro_rules! impl_evm_fixed {
             }
 
             fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-                _buffer: &mut impl Buf,
+                _buffer: &impl Buf,
                 offset: usize,
             ) -> Result<(usize, usize), CodecError> {
                 Ok((offset, Self::DATA_SIZE))
@@ -189,7 +186,7 @@ impl<const BITS: usize, const LIMBS: usize> Encoder for Uint<BITS, LIMBS> {
     }
 
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buffer: &mut impl Buf,
+        buffer: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -212,7 +209,7 @@ impl<const BITS: usize, const LIMBS: usize> Encoder for Uint<BITS, LIMBS> {
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        _buffer: &mut impl Buf,
+        _buffer: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);

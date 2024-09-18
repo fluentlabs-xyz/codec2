@@ -106,7 +106,7 @@ pub trait Encoder: Sized {
     ///
     /// Returns the decoded value if successful, or an `EncoderError` if there was a problem.
     fn decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError>;
 
@@ -123,7 +123,7 @@ pub trait Encoder: Sized {
     ///
     /// For primitive types, the header size is 0, so the offset is returned as-is.
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
-        buf: &mut impl Buf,
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError>;
 }
@@ -175,7 +175,7 @@ pub fn write_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
 }
 
 pub fn read_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
-    buffer: &mut impl Buf,
+    buffer: &impl Buf,
     offset: usize,
 ) -> u32 {
     let aligned_value_size = align_up::<ALIGN>(4);
