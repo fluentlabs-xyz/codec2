@@ -1,14 +1,8 @@
 extern crate alloc;
 
-use alloc::slice;
+use bytes::{Buf, BytesMut};
 
-use crate::encoder::{
-    align, align_up, ByteOrderExt, CodecError, DecodingError, Encoder, EncodingError,
-};
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core::mem::MaybeUninit;
-use std::fmt::Debug;
+use crate::encoder::{align, align_up, ByteOrderExt, CodecError, DecodingError, Encoder};
 
 impl Encoder for u8 {
     const HEADER_SIZE: usize = 0;
@@ -345,13 +339,11 @@ impl<T: Sized + Encoder + Default + Copy, const N: usize> Encoder for [T; N] {
 }
 
 #[cfg(test)]
-
 mod tests {
-    use super::*;
-    use crate::utils::print_buffer_debug;
-    use alloc::vec::Vec;
     use byteorder::{BigEndian, LittleEndian};
-    use bytes::{BufMut, BytesMut};
+    use bytes::{Bytes, BytesMut};
+
+    use super::*;
 
     #[test]
     fn test_u8_be_encode_decode() {

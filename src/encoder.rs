@@ -1,6 +1,5 @@
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use bytes::{Buf, Bytes, BytesMut};
-
 use thiserror::Error;
 
 /// ByteOrderExt is a trait that extends the functionality of the `ByteOrder` trait. It provides a method to determine if the byte order is big endian.
@@ -30,7 +29,8 @@ pub enum CodecError {
 
 #[derive(Debug, Error)]
 pub enum EncodingError {
-    #[error("Not enough space in the buffer: required {required} bytes, but only {available} bytes available. {details}")]
+    #[error("Not enough space in the buffer: required {required} bytes, but only {available} bytes available. {details}"
+    )]
     BufferTooSmall {
         required: usize,
         available: usize,

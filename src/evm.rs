@@ -1,11 +1,11 @@
 use std::usize;
 
-use crate::encoder::{
-    align_up, read_u32_aligned, write_u32_aligned, ByteOrderExt, CodecError, DecodingError, Encoder,
-};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
-
 use bytes::{Buf, BytesMut};
+
+use crate::encoder::{
+    align_up, ByteOrderExt, CodecError, DecodingError, Encoder, read_u32_aligned, write_u32_aligned,
+};
 
 const DEFAULT_HEADER_ELEM_SIZE: usize = 4;
 
@@ -46,26 +46,36 @@ pub fn write_bytes<B: ByteOrderExt, const ALIGN: usize>(
     aligned_header_size
 }
 
-pub fn read_bytes<B: ByteOrderExt, const ALIGN: usize>(buffer: &impl Buf, offset: usize) -> Bytes {
-    let (data_offset, data_len) = read_bytes_header::<B, ALIGN>(buffer, offset);
+pub fn read_bytes<B: ByteOrderExt, const ALIGN: usize>(
+    buffer: &impl Buf,
+    offset: usize,
+) -> Result<Bytes, CodecError> {
+    let (data_offset, data_len) = read_bytes_header::<B, ALIGN>(buffer, offset)?;
 
     let data = buffer.chunk()[data_offset..data_offset + data_len].to_vec();
 
-    Bytes::from(data)
+    Ok(Bytes::from(data))
 }
 
 pub fn read_bytes_header<B: ByteOrderExt, const ALIGN: usize>(
     buffer: &impl Buf,
     offset: usize,
-) -> (usize, usize) {
+) -> Result<(usize, usize), CodecError> {
     let aligned_offset = align_up::<ALIGN>(offset);
     let aligned_elem_size = align_up::<ALIGN>(DEFAULT_HEADER_ELEM_SIZE);
+    if buffer.remaining() < aligned_offset + aligned_elem_size * 2 {
+        return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+            expected: aligned_offset + aligned_elem_size * 2,
+            found: buffer.remaining(),
+            msg: "buffer too small to read bytes header".to_string(),
+        }));
+    }
 
     let data_offset = read_u32_aligned::<B, ALIGN>(buffer, aligned_offset) as usize;
     let data_len =
         read_u32_aligned::<B, ALIGN>(buffer, aligned_offset + aligned_elem_size) as usize;
 
-    (data_offset, data_len)
+    Ok((data_offset, data_len))
 }
 
 impl Encoder for Bytes {
@@ -85,14 +95,14 @@ impl Encoder for Bytes {
         buffer: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
-        Ok(read_bytes::<B, ALIGN>(buffer, offset))
+        read_bytes::<B, ALIGN>(buffer, offset)
     }
 
     fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
         buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
-        Ok(read_bytes_header::<B, ALIGN>(buf, offset))
+        read_bytes_header::<B, ALIGN>(buf, offset)
     }
 }
 
@@ -219,12 +229,12 @@ impl<const BITS: usize, const LIMBS: usize> Encoder for Uint<BITS, LIMBS> {
 
 #[cfg(test)]
 mod tests {
-    use byteorder::{BigEndian, LittleEndian};
-
-    use super::*;
     #[cfg(test)]
     use alloy_primitives::{Address, U256};
-    use bytes::{BufMut, BytesMut};
+    use byteorder::{BigEndian, LittleEndian};
+    use bytes::BytesMut;
+
+    use super::*;
 
     #[test]
     fn test_write_to_existing_buf() {
@@ -255,7 +265,7 @@ mod tests {
 
         let mut encoded = buf.freeze();
 
-        let decoded = read_bytes::<BigEndian, 8>(&mut encoded, 0);
+        let decoded = read_bytes::<BigEndian, 8>(&mut encoded, 0).unwrap();
 
         assert_eq!(decoded, original);
     }

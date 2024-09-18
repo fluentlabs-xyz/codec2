@@ -1,13 +1,16 @@
 extern crate alloc;
+use alloc::vec::Vec;
+
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+
 use crate::{
     encoder::{
-        align_up, read_u32_aligned, write_u32_aligned, ByteOrderExt, CodecError, DecodingError,
-        Encoder, EncodingError,
+        align_up, ByteOrderExt, CodecError, DecodingError, Encoder, read_u32_aligned,
+        write_u32_aligned,
     },
     evm::{read_bytes, read_bytes_header, write_bytes},
 };
-use alloc::vec::Vec;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+
 /// We encode dynamic arrays as following:
 /// - header
 /// - + length - number of elements inside vector
@@ -83,7 +86,8 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
             return Ok(Vec::new());
         }
 
-        let input_bytes = read_bytes::<B, ALIGN>(buf, aligned_offset + aligned_header_el_size);
+        let input_bytes =
+            read_bytes::<B, ALIGN>(buf, aligned_offset + aligned_header_el_size).unwrap();
 
         let mut result = Vec::with_capacity(data_len);
 
@@ -123,7 +127,7 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
         let (data_offset, data_length) = if vec_len == 0 {
             (0, 0)
         } else {
-            read_bytes_header::<B, ALIGN>(buf, aligned_offset + elem_size)
+            read_bytes_header::<B, ALIGN>(buf, aligned_offset + elem_size).unwrap()
         };
 
         Ok((data_offset, data_length))
@@ -134,8 +138,9 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
 mod tests {
     use byteorder::{BigEndian, LittleEndian};
 
-    use super::*;
     use crate::encoder::Encoder;
+
+    use super::*;
 
     #[test]
     fn test_empty_vec_u32() {
