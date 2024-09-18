@@ -1,32 +1,32 @@
+use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
 
-use crate::encoder::{align_up, ByteOrderExt, Encoder};
+use crate::encoder::{align_up, Encoder};
 use crate::error::CodecError;
 
 impl<T: Encoder> Encoder for (T,) {
-    const HEADER_SIZE: usize = 0;
-    const DATA_SIZE: usize = T::DATA_SIZE;
+    const HEADER_SIZE: usize = T::HEADER_SIZE;
 
-    fn encode<B: ByteOrderExt, const ALIGN: usize>(
+    fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         &self,
         buf: &mut BytesMut,
         offset: usize,
     ) -> Result<(), CodecError> {
-        self.0.encode::<B, ALIGN>(buf, offset)
+        self.0.encode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
     }
 
-    fn decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
-        Ok((T::decode::<B, ALIGN>(buf, offset)?,))
+        Ok((T::decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)?,))
     }
 
-    fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
-        T::partial_decode::<B, ALIGN>(buf, offset)
+        T::partial_decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
     }
 }
 
@@ -34,9 +34,8 @@ macro_rules! impl_encoder_for_tuple {
     ($($T:ident),+; $($idx:tt),+) => {
         impl<$($T: Encoder,)+> Encoder for ($($T,)+) {
             const HEADER_SIZE: usize = $($T::HEADER_SIZE +)+ 0;
-            const DATA_SIZE: usize = $($T::DATA_SIZE +)+ 0;
 
-            fn encode<B: ByteOrderExt, const ALIGN: usize>(
+            fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
                 &self,
                 buf: &mut BytesMut,
                 offset: usize,
@@ -44,13 +43,13 @@ macro_rules! impl_encoder_for_tuple {
                 let aligned_offset = align_up::<ALIGN>(offset);
                 let mut current_offset = aligned_offset;
                 $(
-                    self.$idx.encode::<B, ALIGN>(buf, current_offset)?;
-                    current_offset = align_up::<ALIGN>(current_offset + $T::HEADER_SIZE+$T::DATA_SIZE);
+                    self.$idx.encode::<B, ALIGN, SOLIDITY_COMP>(buf, current_offset)?;
+                    current_offset = align_up::<ALIGN>(current_offset + $T::HEADER_SIZE);
                 )+
                 Ok(())
             }
 
-            fn decode<B: ByteOrderExt, const ALIGN: usize>(
+            fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
                 buf: &impl Buf,
                 offset: usize,
             ) -> Result<Self, CodecError> {
@@ -58,14 +57,14 @@ macro_rules! impl_encoder_for_tuple {
                 let mut current_offset = aligned_offset;
                 Ok(($(
                     {
-                        let value = $T::decode::<B, ALIGN>(buf, current_offset)?;
-                        current_offset = align_up::<ALIGN>(current_offset +$T::HEADER_SIZE+ $T::DATA_SIZE);
+                        let value = $T::decode::<B, ALIGN, SOLIDITY_COMP>(buf, current_offset)?;
+                        current_offset = align_up::<ALIGN>(current_offset +$T::HEADER_SIZE);
                         value
                     },
                 )+))
             }
 
-            fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+            fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
                 buf: &impl Buf,
                 offset: usize,
             ) -> Result<(usize, usize), CodecError> {
@@ -73,7 +72,7 @@ macro_rules! impl_encoder_for_tuple {
                 let mut total_size = 0;
                 let mut current_offset = aligned_offset;
                 $(
-                    let (_, size) = $T::partial_decode::<B, ALIGN>(buf, current_offset)?;
+                    let (_, size) = $T::partial_decode::<B, ALIGN, SOLIDITY_COMP>(buf, current_offset)?;
                     current_offset = align_up::<ALIGN>(current_offset + size);
                     total_size += size;
                 )+
@@ -101,12 +100,14 @@ mod tests {
     fn test_single_element_tuple() {
         let original: (u32,) = (100u32,);
         let mut buffer = BytesMut::new();
-        original.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
+        original
+            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .unwrap();
 
         let encoded = buffer.freeze();
         assert_eq!(hex::encode(&encoded), "64000000");
 
-        let decoded = <(u32,)>::decode::<LittleEndian, 4>(&mut encoded.clone(), 0).unwrap();
+        let decoded = <(u32,)>::decode::<LittleEndian, 4, false>(&mut encoded.clone(), 0).unwrap();
         assert_eq!(decoded, original);
     }
 
@@ -115,13 +116,15 @@ mod tests {
         type Tuple = (u32, u16);
         let original: Tuple = (100u32, 20u16);
         let mut buffer = BytesMut::new();
-        original.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
+        original
+            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .unwrap();
 
         let encoded = buffer.freeze();
         println!("{:?}", encoded);
         assert_eq!(hex::encode(&encoded), "6400000014000000");
 
-        let decoded = Tuple::decode::<LittleEndian, 4>(&mut encoded.clone(), 0).unwrap();
+        let decoded = Tuple::decode::<LittleEndian, 4, false>(&mut encoded.clone(), 0).unwrap();
         assert_eq!(decoded, original);
     }
 
@@ -130,7 +133,9 @@ mod tests {
         type Tuple = (u32, u16, u8, u64, u32, u16, u8, u64);
         let original: Tuple = (100u32, 20u16, 30u8, 40u64, 50u32, 60u16, 70u8, 80u64);
         let mut buffer = BytesMut::new();
-        original.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
+        original
+            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .unwrap();
 
         let encoded = buffer.freeze();
         println!("{:?}", hex::encode(&encoded));
@@ -139,7 +144,7 @@ mod tests {
             "64000000140000001e0000002800000000000000320000003c000000460000005000000000000000"
         );
 
-        let decoded = Tuple::decode::<LittleEndian, 4>(&mut encoded.clone(), 0).unwrap();
+        let decoded = Tuple::decode::<LittleEndian, 4, false>(&mut encoded.clone(), 0).unwrap();
         assert_eq!(decoded, original);
     }
 }

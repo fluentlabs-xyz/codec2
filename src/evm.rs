@@ -1,10 +1,10 @@
 use std::usize;
 
-use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
-use bytes::{Buf, BytesMut};
-
-use crate::encoder::{align_up, read_u32_aligned, write_u32_aligned, ByteOrderExt, Encoder};
+use crate::encoder::{align_up, is_big_endian, read_u32_aligned, write_u32_aligned, Encoder};
 use crate::error::{CodecError, DecodingError};
+use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
+use byteorder::ByteOrder;
+use bytes::{Buf, BytesMut};
 
 const DEFAULT_HEADER_ELEM_SIZE: usize = 4;
 
@@ -13,7 +13,7 @@ const DEFAULT_HEADER_ELEM_SIZE: usize = 4;
 // To avoid resizing buffer, you can pre-allocate the buffer with the size of the header before calling this function
 // The header contains the offset and length of the data
 // The actual data is appended to the buffer, after the header
-pub fn write_bytes<B: ByteOrderExt, const ALIGN: usize>(
+pub fn write_bytes<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
     buffer: &mut BytesMut,
     offset: usize,
     bytes: &[u8],
@@ -30,10 +30,10 @@ pub fn write_bytes<B: ByteOrderExt, const ALIGN: usize>(
     let data_offset = buffer.len();
 
     // Write header
-    write_u32_aligned::<B, ALIGN>(buffer, aligned_offset, data_offset as u32);
+    write_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buffer, aligned_offset, data_offset as u32);
 
     // Write length of the data
-    write_u32_aligned::<B, ALIGN>(
+    write_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(
         buffer,
         aligned_offset + aligned_elem_size,
         bytes.len() as u32,
@@ -45,18 +45,18 @@ pub fn write_bytes<B: ByteOrderExt, const ALIGN: usize>(
     aligned_header_size
 }
 
-pub fn read_bytes<B: ByteOrderExt, const ALIGN: usize>(
+pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
     buffer: &impl Buf,
     offset: usize,
 ) -> Result<Bytes, CodecError> {
-    let (data_offset, data_len) = read_bytes_header::<B, ALIGN>(buffer, offset)?;
+    let (data_offset, data_len) = read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(buffer, offset)?;
 
     let data = buffer.chunk()[data_offset..data_offset + data_len].to_vec();
 
     Ok(Bytes::from(data))
 }
 
-pub fn read_bytes_header<B: ByteOrderExt, const ALIGN: usize>(
+pub fn read_bytes_header<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
     buffer: &impl Buf,
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
@@ -70,46 +70,45 @@ pub fn read_bytes_header<B: ByteOrderExt, const ALIGN: usize>(
         }));
     }
 
-    let data_offset = read_u32_aligned::<B, ALIGN>(buffer, aligned_offset) as usize;
+    let data_offset = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buffer, aligned_offset) as usize;
     let data_len =
-        read_u32_aligned::<B, ALIGN>(buffer, aligned_offset + aligned_elem_size) as usize;
+        read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buffer, aligned_offset + aligned_elem_size)
+            as usize;
 
     Ok((data_offset, data_len))
 }
 
 impl Encoder for Bytes {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
-    const DATA_SIZE: usize = 0;
 
-    fn encode<B: ByteOrderExt, const ALIGN: usize>(
+    fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         &self,
         buffer: &mut BytesMut,
         offset: usize,
     ) -> Result<(), CodecError> {
-        let _ = write_bytes::<B, ALIGN>(buffer, offset, self);
+        let _ = write_bytes::<B, ALIGN, SOLIDITY_COMP>(buffer, offset, self);
         Ok(())
     }
 
-    fn decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buffer: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
-        read_bytes::<B, ALIGN>(buffer, offset)
+        read_bytes::<B, ALIGN, SOLIDITY_COMP>(buffer, offset)
     }
 
-    fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
-        read_bytes_header::<B, ALIGN>(buf, offset)
+        read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
     }
 }
 
 impl<const N: usize> Encoder for FixedBytes<N> {
-    const HEADER_SIZE: usize = 0;
-    const DATA_SIZE: usize = N;
+    const HEADER_SIZE: usize = N;
 
-    fn encode<B: ByteOrderExt, const ALIGN: usize>(
+    fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         &self,
         buffer: &mut BytesMut,
         offset: usize,
@@ -121,7 +120,7 @@ impl<const N: usize> Encoder for FixedBytes<N> {
         Ok(())
     }
 
-    fn decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buffer: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
@@ -129,7 +128,7 @@ impl<const N: usize> Encoder for FixedBytes<N> {
         Ok(FixedBytes::from_slice(&data))
     }
 
-    fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         _buffer: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
@@ -140,30 +139,31 @@ impl<const N: usize> Encoder for FixedBytes<N> {
 macro_rules! impl_evm_fixed {
     ($typ:ty) => {
         impl Encoder for $typ {
-            const HEADER_SIZE: usize = 0;
-            const DATA_SIZE: usize = <$typ>::len_bytes();
+            const HEADER_SIZE: usize = <$typ>::len_bytes();
 
-            fn encode<B: ByteOrderExt, const ALIGN: usize>(
+            fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
                 &self,
                 buffer: &mut BytesMut,
                 offset: usize,
             ) -> Result<(), CodecError> {
-                self.0.encode::<B, ALIGN>(buffer, offset)
+                self.0.encode::<B, ALIGN, SOLIDITY_COMP>(buffer, offset)
             }
 
-            fn decode<B: ByteOrderExt, const ALIGN: usize>(
+            fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
                 buffer: &impl Buf,
                 offset: usize,
             ) -> Result<Self, CodecError> {
-                let inner = FixedBytes::<{ Self::DATA_SIZE }>::decode::<B, ALIGN>(buffer, offset)?;
+                let inner = FixedBytes::<{ Self::HEADER_SIZE }>::decode::<B, ALIGN, SOLIDITY_COMP>(
+                    buffer, offset,
+                )?;
                 Ok(Self(inner))
             }
 
-            fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+            fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
                 _buffer: &impl Buf,
                 offset: usize,
             ) -> Result<(usize, usize), CodecError> {
-                Ok((offset, Self::DATA_SIZE))
+                Ok((offset, Self::HEADER_SIZE))
             }
         }
     };
@@ -172,20 +172,19 @@ macro_rules! impl_evm_fixed {
 impl_evm_fixed!(Address);
 
 impl<const BITS: usize, const LIMBS: usize> Encoder for Uint<BITS, LIMBS> {
-    const HEADER_SIZE: usize = 0;
-    const DATA_SIZE: usize = Self::BYTES;
+    const HEADER_SIZE: usize = Self::BYTES;
 
-    fn encode<B: ByteOrderExt, const ALIGN: usize>(
+    fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         &self,
         buffer: &mut BytesMut,
         offset: usize,
     ) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        if buffer.len() < aligned_offset + Self::DATA_SIZE {
-            buffer.resize(aligned_offset + Self::DATA_SIZE, 0);
+        if buffer.len() < aligned_offset + Self::HEADER_SIZE {
+            buffer.resize(aligned_offset + Self::HEADER_SIZE, 0);
         }
-        let bytes = &mut buffer[aligned_offset..aligned_offset + Self::DATA_SIZE];
-        if B::is_big_endian() {
+        let bytes = &mut buffer[aligned_offset..aligned_offset + Self::HEADER_SIZE];
+        if is_big_endian::<B>() {
             bytes.copy_from_slice(&self.to_be_bytes_vec());
         } else {
             bytes.copy_from_slice(&self.to_le_bytes_vec());
@@ -194,21 +193,21 @@ impl<const BITS: usize, const LIMBS: usize> Encoder for Uint<BITS, LIMBS> {
         Ok(())
     }
 
-    fn decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buffer: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        if buffer.remaining() < aligned_offset + Self::DATA_SIZE {
+        if buffer.remaining() < aligned_offset + Self::HEADER_SIZE {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + Self::DATA_SIZE,
+                expected: aligned_offset + Self::HEADER_SIZE,
                 found: buffer.remaining(),
                 msg: "buffer too small to read Uint".to_string(),
             }));
         }
 
-        let chunk = &buffer.chunk()[aligned_offset..aligned_offset + Self::DATA_SIZE];
-        let value = if B::is_big_endian() {
+        let chunk = &buffer.chunk()[aligned_offset..aligned_offset + Self::HEADER_SIZE];
+        let value = if is_big_endian::<B>() {
             Self::from_be_slice(chunk)
         } else {
             Self::from_le_slice(chunk)
@@ -217,12 +216,12 @@ impl<const BITS: usize, const LIMBS: usize> Encoder for Uint<BITS, LIMBS> {
         Ok(value)
     }
 
-    fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         _buffer: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        Ok((aligned_offset, Self::DATA_SIZE))
+        Ok((aligned_offset, Self::HEADER_SIZE))
     }
 }
 
@@ -249,7 +248,7 @@ mod tests {
 
         let original = Bytes::from_static(b"Hello, World");
         // Write the data to the buffer
-        let _result = write_bytes::<BigEndian, 8>(&mut buf, 16, &original);
+        let _result = write_bytes::<BigEndian, 8, false>(&mut buf, 16, &original);
 
         let expected = [
             0, 0, 0, 0, 0, 0, 0, 32, // offset of the 1st bytes
@@ -264,7 +263,7 @@ mod tests {
 
         let mut encoded = buf.freeze();
 
-        let decoded = read_bytes::<BigEndian, 8>(&mut encoded, 0).unwrap();
+        let decoded = read_bytes::<BigEndian, 8, false>(&mut encoded, 0).unwrap();
 
         assert_eq!(decoded, original);
     }
@@ -273,12 +272,14 @@ mod tests {
         let original = Address::from([0x42; 20]);
         let mut buffer = BytesMut::new();
 
-        original.encode::<LittleEndian, 1>(&mut buffer, 0).unwrap();
+        original
+            .encode::<LittleEndian, 1, false>(&mut buffer, 0)
+            .unwrap();
 
         let encoded = buffer.freeze();
         println!("Encoded Address: {}", hex::encode(&encoded));
 
-        let decoded = Address::decode::<LittleEndian, 1>(&mut encoded.clone(), 0).unwrap();
+        let decoded = Address::decode::<LittleEndian, 1, false>(&mut encoded.clone(), 0).unwrap();
 
         assert_eq!(original, decoded);
     }
@@ -288,12 +289,14 @@ mod tests {
         let original = Address::from([0x42; 20]);
         let mut buffer = BytesMut::new();
 
-        original.encode::<BigEndian, 8>(&mut buffer, 3).unwrap();
+        original
+            .encode::<BigEndian, 8, false>(&mut buffer, 3)
+            .unwrap();
 
         let encoded = buffer.freeze();
         println!("Encoded Address (Aligned): {}", hex::encode(&encoded));
 
-        let decoded = Address::decode::<BigEndian, 8>(&mut encoded.clone(), 3).unwrap();
+        let decoded = Address::decode::<BigEndian, 8, false>(&mut encoded.clone(), 3).unwrap();
 
         assert_eq!(original, decoded);
     }
@@ -303,13 +306,15 @@ mod tests {
         let original = U256::from(0x1234567890abcdef_u64);
         let mut buffer = BytesMut::new();
 
-        original.encode::<LittleEndian, 4>(&mut buffer, 0).unwrap();
+        original
+            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .unwrap();
 
         let encoded = buffer.freeze();
         println!("Encoded U256 (LE): {}", hex::encode(&encoded));
         let expected_encoded = "efcdab9078563412000000000000000000000000000000000000000000000000";
         assert_eq!(hex::encode(&encoded), expected_encoded);
-        let decoded = U256::decode::<LittleEndian, 4>(&mut encoded.clone(), 0).unwrap();
+        let decoded = U256::decode::<LittleEndian, 4, false>(&mut encoded.clone(), 0).unwrap();
 
         assert_eq!(original, decoded);
     }
@@ -319,14 +324,16 @@ mod tests {
         let original = U256::from(0x1234567890abcdef_u64);
         let mut buffer = BytesMut::new();
 
-        original.encode::<BigEndian, 4>(&mut buffer, 0).unwrap();
+        original
+            .encode::<BigEndian, 4, false>(&mut buffer, 0)
+            .unwrap();
 
         let mut encoded = buffer.freeze();
         println!("Encoded U256 (BE): {}", hex::encode(&encoded));
         let expected_encoded = "0000000000000000000000000000000000000000000000001234567890abcdef";
         assert_eq!(hex::encode(&encoded), expected_encoded);
 
-        let decoded = U256::decode::<BigEndian, 4>(&mut encoded, 0).unwrap();
+        let decoded = U256::decode::<BigEndian, 4, false>(&mut encoded, 0).unwrap();
 
         assert_eq!(original, decoded);
     }

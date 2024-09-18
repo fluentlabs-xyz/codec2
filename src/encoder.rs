@@ -3,23 +3,6 @@ use bytes::{Buf, Bytes, BytesMut};
 
 use crate::error::CodecError;
 
-/// ByteOrderExt is a trait that extends the functionality of the `ByteOrder` trait. It provides a method to determine if the byte order is big endian.
-pub trait ByteOrderExt: ByteOrder {
-    fn is_big_endian() -> bool;
-}
-
-impl ByteOrderExt for BigEndian {
-    fn is_big_endian() -> bool {
-        true
-    }
-}
-
-impl ByteOrderExt for LittleEndian {
-    fn is_big_endian() -> bool {
-        false
-    }
-}
-
 // TODO: @d1r1 Investigate whether decoding the result into an uninitialized memory (e.g., using `MaybeUninit`)
 // would be more efficient than initializing with `Default`.
 // This could potentially reduce unnecessary memory initialization overhead in cases where
@@ -30,13 +13,10 @@ pub trait Encoder: Sized {
     /// Header used to save metadata about the encoded value.
     const HEADER_SIZE: usize;
 
-    /// Returns known size of the encoded value data.
-    const DATA_SIZE: usize;
-
     /// How many bytes we should allocate for the encoded value.
     /// This is the sum of the header size and the known data size.
     fn size_hint<const ALIGN: usize>(&self) -> usize {
-        align_up::<ALIGN>(Self::HEADER_SIZE) + align_up::<ALIGN>(Self::DATA_SIZE)
+        align_up::<ALIGN>(Self::HEADER_SIZE)
     }
 
     /// Encodes the value into the given buffer at the specified offset. The buffer must be large enough to hold at least `align(offset) + Self::HEADER_SIZE` bytes.
@@ -49,7 +29,7 @@ pub trait Encoder: Sized {
     /// # Returns
     ///
     /// Returns `Ok(())` if encoding was successful, or an `EncoderError` if there was a problem.
-    fn encode<B: ByteOrderExt, const ALIGN: usize>(
+    fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         &self,
         buf: &mut BytesMut,
         offset: usize,
@@ -65,7 +45,7 @@ pub trait Encoder: Sized {
     /// # Returns
     ///
     /// Returns the decoded value if successful, or an `EncoderError` if there was a problem.
-    fn decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError>;
@@ -82,10 +62,15 @@ pub trait Encoder: Sized {
     /// Returns a tuple of `(offset, data_length)` if successful, or an `EncoderError` if there was a problem.
     ///
     /// For primitive types, the header size is 0, so the offset is returned as-is.
-    fn partial_decode<B: ByteOrderExt, const ALIGN: usize>(
+    fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError>;
+}
+
+// TODO: d1r1 is it possible to make this fn const?
+pub fn is_big_endian<B: ByteOrder>() -> bool {
+    B::read_u16(&[0x12, 0x34]) == 0x1234
 }
 
 /// Rounds up the given offset to the nearest multiple of ALIGN.
@@ -96,12 +81,12 @@ pub const fn align_up<const ALIGN: usize>(offset: usize) -> usize {
 }
 
 /// Aligns the source bytes to the specified alignment.
-pub fn align<B: ByteOrderExt, const ALIGN: usize>(src: &[u8]) -> Bytes {
+pub fn align<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(src: &[u8]) -> Bytes {
     let aligned_src_len = align_up::<ALIGN>(src.len());
     let aligned_total_size = aligned_src_len.max(ALIGN);
     let mut aligned = BytesMut::zeroed(aligned_total_size);
 
-    if B::is_big_endian() {
+    if is_big_endian::<B>() {
         // For big-endian, copy to the end of the aligned array
         let start = aligned_total_size - src.len();
         aligned[start..].copy_from_slice(src);
@@ -113,7 +98,7 @@ pub fn align<B: ByteOrderExt, const ALIGN: usize>(src: &[u8]) -> Bytes {
     aligned.freeze()
 }
 
-pub fn write_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
+pub fn write_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
     buffer: &mut BytesMut,
     offset: usize,
     value: u32,
@@ -124,7 +109,7 @@ pub fn write_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
         buffer.resize(offset + aligned_value_size, 0);
     }
 
-    if B::is_big_endian() {
+    if is_big_endian::<B>() {
         // For big-endian, copy to the end of the aligned array
         let start = offset + aligned_value_size - 4;
         B::write_u32(&mut buffer[start..], value);
@@ -134,13 +119,13 @@ pub fn write_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
     }
 }
 
-pub fn read_u32_aligned<B: ByteOrderExt, const ALIGN: usize>(
+pub fn read_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
     buffer: &impl Buf,
     offset: usize,
 ) -> u32 {
     let aligned_value_size = align_up::<ALIGN>(4);
 
-    if B::is_big_endian() {
+    if is_big_endian::<B>() {
         // For big-endian, copy from the end of the aligned array
         let start = offset + aligned_value_size - 4;
         B::read_u32(&buffer.chunk()[start..])
