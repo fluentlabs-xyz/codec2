@@ -6,12 +6,11 @@ use bytes::{Buf, BytesMut};
 use hashbrown::{HashMap, HashSet};
 
 use crate::{
-    encoder::{
-        align_up, ByteOrderExt, CodecError, DecodingError, Encoder, read_u32_aligned,
-        write_u32_aligned,
-    },
+    encoder::{align_up, read_u32_aligned, write_u32_aligned, ByteOrderExt, Encoder},
     evm::{read_bytes_header, write_bytes},
 };
+
+use crate::error::{CodecError, DecodingError};
 
 /// Example of encoding a nested HashMap:
 ///
@@ -92,7 +91,7 @@ where
     V: Default + Sized + Encoder,
 {
     const HEADER_SIZE: usize = 4 + 8 + 8; // length + keys_header + values_header
-    // const HEADER_SIZE: usize = align_up::<4>(4) * 3; // length + keys_length + values_length
+                                          // const HEADER_SIZE: usize = align_up::<4>(4) * 3; // length + keys_length + values_length
     const DATA_SIZE: usize = 0; // Dynamic size
 
     fn encode<B: ByteOrderExt, const ALIGN: usize>(

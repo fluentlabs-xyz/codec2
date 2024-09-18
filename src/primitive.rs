@@ -2,7 +2,9 @@ extern crate alloc;
 
 use bytes::{Buf, BytesMut};
 
-use crate::encoder::{align, align_up, ByteOrderExt, CodecError, DecodingError, Encoder};
+use crate::encoder::{align, align_up, ByteOrderExt, Encoder};
+
+use crate::error::{CodecError, DecodingError};
 
 impl Encoder for u8 {
     const HEADER_SIZE: usize = 0;

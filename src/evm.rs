@@ -3,9 +3,8 @@ use std::usize;
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use bytes::{Buf, BytesMut};
 
-use crate::encoder::{
-    align_up, ByteOrderExt, CodecError, DecodingError, Encoder, read_u32_aligned, write_u32_aligned,
-};
+use crate::encoder::{align_up, read_u32_aligned, write_u32_aligned, ByteOrderExt, Encoder};
+use crate::error::{CodecError, DecodingError};
 
 const DEFAULT_HEADER_ELEM_SIZE: usize = 4;
 

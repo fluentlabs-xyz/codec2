@@ -1,6 +1,7 @@
 use bytes::{Buf, BytesMut};
 
-use crate::encoder::{align_up, ByteOrderExt, CodecError, Encoder};
+use crate::encoder::{align_up, ByteOrderExt, Encoder};
+use crate::error::CodecError;
 
 impl<T: Encoder> Encoder for (T,) {
     const HEADER_SIZE: usize = 0;

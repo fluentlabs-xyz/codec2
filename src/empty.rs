@@ -1,7 +1,8 @@
 use bytes::{Buf, BytesMut};
 
 use crate::encoder::{align_up, read_u32_aligned, write_u32_aligned};
-use crate::encoder::{ByteOrderExt, CodecError, DecodingError, Encoder};
+use crate::encoder::{ByteOrderExt, Encoder};
+use crate::error::{CodecError, DecodingError};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct EmptyVec;

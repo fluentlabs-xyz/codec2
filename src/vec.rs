@@ -1,13 +1,11 @@
 extern crate alloc;
 use alloc::vec::Vec;
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BytesMut};
 
+use crate::error::{CodecError, DecodingError};
 use crate::{
-    encoder::{
-        align_up, ByteOrderExt, CodecError, DecodingError, Encoder, read_u32_aligned,
-        write_u32_aligned,
-    },
+    encoder::{align_up, read_u32_aligned, write_u32_aligned, ByteOrderExt, Encoder},
     evm::{read_bytes, read_bytes_header, write_bytes},
 };
 
@@ -136,9 +134,9 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
 
 #[cfg(test)]
 mod tests {
-    use byteorder::{BigEndian, LittleEndian};
-
     use crate::encoder::Encoder;
+    use byteorder::{BigEndian, LittleEndian};
+    use bytes::{Bytes, BytesMut};
 
     use super::*;
 
