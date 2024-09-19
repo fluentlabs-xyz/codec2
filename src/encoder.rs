@@ -1,4 +1,6 @@
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use std::marker::PhantomData;
+
+use byteorder::{BigEndian, ByteOrder, LittleEndian, BE, LE};
 use bytes::{Buf, Bytes, BytesMut};
 
 use crate::error::CodecError;
@@ -67,6 +69,47 @@ pub trait Encoder: Sized {
         offset: usize,
     ) -> Result<(usize, usize), CodecError>;
 }
+
+pub struct EncoderMode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool> {
+    _byte_order: PhantomData<B>,
+}
+
+pub type SolidityEncoderMode = EncoderMode<BE, 32, true>;
+pub type WasmEncoderMode = EncoderMode<LE, 8, false>;
+
+pub struct EncoderModeAdapter<T, M>(PhantomData<(T, M)>);
+
+impl<T, B, const ALIGN: usize, const SOLIDITY_COMP: bool>
+    EncoderModeAdapter<T, EncoderMode<B, ALIGN, SOLIDITY_COMP>>
+where
+    T: Encoder,
+    B: ByteOrder,
+{
+    pub fn encode(value: &T, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+        value.encode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
+    }
+
+    pub fn decode(buf: &impl Buf, offset: usize) -> Result<T, CodecError> {
+        T::decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
+    }
+
+    pub fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+        T::partial_decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
+    }
+
+    pub fn size_hint(value: &T) -> usize {
+        value.size_hint::<ALIGN>()
+    }
+}
+
+/// Example usage:
+/// ```
+/// WasmABI::<u32>::encode(&42, &mut buf, 0);
+/// let value = WasmABI::<u32>::decode(&buf, 0);
+pub type SolidityABI<T> = EncoderModeAdapter<T, SolidityEncoderMode>;
+pub type WasmABI<T> = EncoderModeAdapter<T, WasmEncoderMode>;
+
+// TODO: move functions bellow to the utils module
 
 // TODO: d1r1 is it possible to make this fn const?
 pub fn is_big_endian<B: ByteOrder>() -> bool {
