@@ -11,7 +11,7 @@ pub enum CodecError {
 
 #[derive(Debug, Error)]
 pub enum EncodingError {
-    #[error("Not enough space in the buffer: required {required} bytes, but only {available} bytes available. {details}"
+    #[error("Not enough space in the buf: required {required} bytes, but only {available} bytes available. {details}"
     )]
     BufferTooSmall {
         required: usize,
@@ -28,14 +28,14 @@ pub enum DecodingError {
     #[error("Invalid data encountered during decoding: {0}")]
     InvalidData(String),
 
-    #[error("Not enough data in the buffer: expected at least {expected} bytes, found {found}")]
+    #[error("Not enough data in the buf: expected at least {expected} bytes, found {found}")]
     BufferTooSmall {
         expected: usize,
         found: usize,
         msg: String,
     },
 
-    #[error("Unexpected end of buffer")]
+    #[error("Unexpected end of buf")]
     UnexpectedEof,
 
     #[error("Parsing error: {0}")]

@@ -8,8 +8,8 @@ use bytes::{Buf, BytesMut};
 use hashbrown::{HashMap, HashSet};
 
 use crate::{
+    bytes::{read_bytes_header, write_bytes},
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
-    evm::{read_bytes_header, write_bytes},
 };
 
 use crate::error::{CodecError, DecodingError};
@@ -93,7 +93,6 @@ where
     V: Default + Sized + Encoder,
 {
     const HEADER_SIZE: usize = 4 + 8 + 8; // length + keys_header + values_header
-                                          // const HEADER_SIZE: usize = align_up::<4>(4) * 3; // length + keys_length + values_length
 
     fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         &self,
@@ -151,7 +150,7 @@ where
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -207,7 +206,7 @@ where
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -281,7 +280,7 @@ where
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -324,7 +323,7 @@ where
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -350,16 +349,16 @@ where
 //     // length (4) + keys (8) (bytes)
 //     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
 
-//     fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(&self, buffer: &mut BytesMut, offset: usize) {
+//     fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(&self, buf: &mut BytesMut, offset: usize) {
 //         let aligned_offset = A::align(offset);
 
-//         if buffer.len() < aligned_offset + 4 {
-//             buffer.resize(aligned_offset + 4, 0);
+//         if buf.len() < aligned_offset + 4 {
+//             buf.resize(aligned_offset + 4, 0);
 //         }
 
 //         // HashSet size
 //         E::write::<u32>(
-//             &mut buffer[aligned_offset..aligned_offset + 4],
+//             &mut buf[aligned_offset..aligned_offset + 4],
 //             self.len() as u32,
 //         );
 
@@ -375,7 +374,7 @@ where
 //         }
 
 //         // Write values
-//         write_bytes::<A, E>(buffer, aligned_offset + 4, &value_buffer);
+//         write_bytes::<A, E>(buf, aligned_offset + 4, &value_buffer);
 //     }
 
 //     fn decode_header<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
@@ -446,11 +445,11 @@ mod tests {
         values.insert(1000, HashMap::from([(7, 8), (9, 4)]));
         let expected_encoded = "03000000140000000c000000200000005c0000000300000064000000e8030000000000003c000000000000003c00000000000000020000003c000000080000004400000008000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
 
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         values
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
-        let encoded = buffer.freeze();
+        let encoded = buf.freeze();
 
         assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
 
@@ -474,11 +473,11 @@ mod tests {
         values.insert(100, 20);
         values.insert(3, 5);
         values.insert(1000, 60);
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         values
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
-        let result = buffer.freeze();
+        let result = buf.freeze();
 
         let encoded_hex = hex::encode(&result);
         println!("Encoded: {}", encoded_hex);
@@ -495,12 +494,12 @@ mod tests {
             HashMap::from([(7, 8), (9, 4)]),
         ];
 
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         values
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
 
-        let result = buffer.freeze();
+        let result = buf.freeze();
         println!("{}", hex::encode(&result));
         let expected_encoded = "030000000c0000005c000000020000003c000000080000004400000008000000000000004c000000000000004c00000000000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
 
@@ -516,11 +515,11 @@ mod tests {
         values.insert(vec![0, 1, 2], vec![3, 4, 5]);
         values.insert(vec![3, 1, 2], vec![3, 4, 5]);
         values.insert(vec![0, 1, 6], vec![3, 4, 5]);
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         values
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
-        let result = buffer.freeze();
+        let result = buf.freeze();
 
         // Note: The expected encoded string might need to be updated based on the new encoding format
         let expected_encoded = "0300000014000000480000005c0000004800000003000000240000000c00000003000000300000000c000000030000003c0000000c00000000000000010000000200000000000000010000000600000003000000010000000200000003000000240000000c00000003000000300000000c000000030000003c0000000c000000030000000400000005000000030000000400000005000000030000000400000005000000";
@@ -534,11 +533,11 @@ mod tests {
     #[test]
     fn test_set() {
         let values = HashSet::from([1, 2, 3]);
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         values
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
-        let result = buffer.freeze();
+        let result = buf.freeze();
 
         println!("{}", hex::encode(&result));
         let expected_encoded = "030000000c0000000c000000010000000200000003000000";

@@ -37,7 +37,7 @@ impl Encoder for EmptyVec {
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -77,7 +77,7 @@ impl Encoder for EmptyVec {
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -119,12 +119,12 @@ mod tests {
     #[test]
     fn test_empty_vec_little_endian() {
         let empty_vec = EmptyVec;
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         empty_vec
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         assert_eq!(hex::encode(&encoded), "000000000c00000000000000");
 
         let decoded = EmptyVec::decode::<LittleEndian, 4, false>(&mut encoded.clone(), 0).unwrap();
@@ -139,12 +139,12 @@ mod tests {
     #[test]
     fn test_empty_vec_big_endian() {
         let empty_vec = EmptyVec;
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         empty_vec
-            .encode::<BigEndian, 4, false>(&mut buffer, 0)
+            .encode::<BigEndian, 4, false>(&mut buf, 0)
             .unwrap();
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         assert_eq!(hex::encode(&encoded), "000000000000000c00000000");
 
         let decoded = EmptyVec::decode::<BigEndian, 4, false>(&mut encoded.clone(), 0).unwrap();
@@ -159,12 +159,12 @@ mod tests {
     #[test]
     fn test_empty_vec_with_offset() {
         let empty_vec = EmptyVec;
-        let mut buffer = BytesMut::from(&[0xFF, 0xFF, 0xFF][..]);
+        let mut buf = BytesMut::from(&[0xFF, 0xFF, 0xFF][..]);
         empty_vec
-            .encode::<LittleEndian, 4, false>(&mut buffer, 3)
+            .encode::<LittleEndian, 4, false>(&mut buf, 3)
             .unwrap();
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         assert_eq!(hex::encode(&encoded), "ffffff00000000000c00000000000000");
 
         let decoded = EmptyVec::decode::<LittleEndian, 4, false>(&mut encoded.clone(), 3).unwrap();

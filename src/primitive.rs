@@ -20,7 +20,7 @@ impl Encoder for u8 {
         let word_size = align_up::<ALIGN>(ALIGN.max(Self::HEADER_SIZE));
 
         if buf.len() < aligned_offset + word_size {
-            // Resize the buffer to fit the encoded data
+            // Resize the buf to fit the encoded data
             buf.resize(aligned_offset + word_size, 0);
         }
 
@@ -30,7 +30,7 @@ impl Encoder for u8 {
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -55,7 +55,7 @@ impl Encoder for u8 {
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        _buf: &impl Buf,
+        _buf: &(impl Buf + ?Sized),
         _offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         Ok((0, Self::HEADER_SIZE))
@@ -76,7 +76,7 @@ impl Encoder for bool {
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         let value = u8::decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)?;
@@ -85,7 +85,7 @@ impl Encoder for bool {
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        _buf: &impl Buf,
+        _buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         Ok((offset, Self::HEADER_SIZE))
@@ -119,7 +119,7 @@ macro_rules! impl_int {
             }
 
             fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-                buf: &impl Buf,
+                buf: &(impl Buf + ?Sized),
                 offset: usize,
             ) -> Result<Self, CodecError> {
                 let aligned_offset = align_up::<ALIGN>(offset);
@@ -145,7 +145,7 @@ macro_rules! impl_int {
             }
 
             fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-                _buf: &impl Buf,
+                _buf: &(impl Buf + ?Sized),
                 offset: usize,
             ) -> Result<(usize, usize), CodecError> {
                 Ok((offset, Self::HEADER_SIZE))
@@ -202,7 +202,7 @@ impl<T: Sized + Encoder + Default> Encoder for Option<T> {
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -235,7 +235,7 @@ impl<T: Sized + Encoder + Default> Encoder for Option<T> {
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -292,7 +292,7 @@ impl<T: Sized + Encoder + Default + Copy, const N: usize> Encoder for [T; N] {
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -311,7 +311,7 @@ impl<T: Sized + Encoder + Default + Copy, const N: usize> Encoder for [T; N] {
         let elem_size = align_up::<ALIGN>(T::HEADER_SIZE + T::HEADER_SIZE);
 
         for (i, item) in result.iter_mut().enumerate() {
-            // Offset is always 0 - we are advancing the buffer by reading the item
+            // Offset is always 0 - we are advancing the buf by reading the item
             *item = T::decode::<B, ALIGN, SOLIDITY_COMP>(buf, i * elem_size)?;
         }
 
@@ -319,7 +319,7 @@ impl<T: Sized + Encoder + Default + Copy, const N: usize> Encoder for [T; N] {
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -350,43 +350,43 @@ mod tests {
         let original: u8 = 1;
         const ALIGNMENT: usize = 32;
 
-        let mut buffer = BytesMut::zeroed(ALIGNMENT);
+        let mut buf = BytesMut::zeroed(ALIGNMENT);
 
-        println!("Buffer capacity: {}", buffer.capacity());
+        println!("Buffer capacity: {}", buf.capacity());
 
-        let encoding_result = original.encode::<BigEndian, ALIGNMENT, false>(&mut buffer, 0);
+        let encoding_result = original.encode::<BigEndian, ALIGNMENT, false>(&mut buf, 0);
 
         assert!(encoding_result.is_ok());
 
         let expected_encoded = "0000000000000000000000000000000000000000000000000000000000000001";
 
-        assert_eq!(hex::encode(&buffer), expected_encoded);
+        assert_eq!(hex::encode(&buf), expected_encoded);
 
-        let mut buf_for_decode = buffer.clone().freeze();
+        let mut buf_for_decode = buf.clone().freeze();
         let decoded = u8::decode::<BigEndian, 32, false>(&mut buf_for_decode, 0).unwrap();
 
         assert_eq!(original, decoded);
-        println!("encoded: {:?}", buffer);
+        println!("encoded: {:?}", buf);
 
         let partial_decoded =
-            u8::partial_decode::<BigEndian, 32, false>(&mut buffer.clone().freeze(), 0).unwrap();
+            u8::partial_decode::<BigEndian, 32, false>(&mut buf.clone().freeze(), 0).unwrap();
         assert_eq!(partial_decoded, (0, 1));
     }
     #[test]
     fn test_u8_le_encode_decode() {
         let original: u8 = 1;
         const ALIGNMENT: usize = 32;
-        let mut buffer = BytesMut::zeroed(ALIGNMENT);
+        let mut buf = BytesMut::zeroed(ALIGNMENT);
 
-        println!("Buffer capacity: {}", buffer.capacity());
+        println!("Buffer capacity: {}", buf.capacity());
 
-        let encoding_result = original.encode::<LittleEndian, ALIGNMENT, false>(&mut buffer, 0);
+        let encoding_result = original.encode::<LittleEndian, ALIGNMENT, false>(&mut buf, 0);
 
         assert!(encoding_result.is_ok());
 
         let expected_encoded = "0100000000000000000000000000000000000000000000000000000000000000";
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         println!("Encoded: {:?}", encoded);
         assert_eq!(hex::encode(&encoded), expected_encoded);
 
@@ -405,43 +405,43 @@ mod tests {
         let original: bool = true;
         const ALIGNMENT: usize = 32;
 
-        let mut buffer = BytesMut::zeroed(ALIGNMENT);
+        let mut buf = BytesMut::zeroed(ALIGNMENT);
 
-        println!("Buffer capacity: {}", buffer.capacity());
+        println!("Buffer capacity: {}", buf.capacity());
 
-        let encoding_result = original.encode::<BigEndian, ALIGNMENT, false>(&mut buffer, 0);
+        let encoding_result = original.encode::<BigEndian, ALIGNMENT, false>(&mut buf, 0);
 
         assert!(encoding_result.is_ok());
 
         let expected_encoded = "0000000000000000000000000000000000000000000000000000000000000001";
 
-        assert_eq!(hex::encode(&buffer), expected_encoded);
+        assert_eq!(hex::encode(&buf), expected_encoded);
 
-        let mut buf_for_decode = buffer.clone().freeze();
+        let mut buf_for_decode = buf.clone().freeze();
         let decoded = bool::decode::<BigEndian, 32, false>(&mut buf_for_decode, 0).unwrap();
 
         assert_eq!(original, decoded);
-        println!("encoded: {:?}", buffer);
+        println!("encoded: {:?}", buf);
 
         let partial_decoded =
-            bool::partial_decode::<BigEndian, 32, false>(&mut buffer.clone().freeze(), 0).unwrap();
+            bool::partial_decode::<BigEndian, 32, false>(&mut buf.clone().freeze(), 0).unwrap();
         assert_eq!(partial_decoded, (0, 1));
     }
     #[test]
     fn test_bool_le_encode_decode() {
         let original: bool = true;
         const ALIGNMENT: usize = 32;
-        let mut buffer = BytesMut::zeroed(ALIGNMENT);
+        let mut buf = BytesMut::zeroed(ALIGNMENT);
 
-        println!("Buffer capacity: {}", buffer.capacity());
+        println!("Buffer capacity: {}", buf.capacity());
 
-        let encoding_result = original.encode::<LittleEndian, ALIGNMENT, false>(&mut buffer, 0);
+        let encoding_result = original.encode::<LittleEndian, ALIGNMENT, false>(&mut buf, 0);
 
         assert!(encoding_result.is_ok());
 
         let expected_encoded = "0100000000000000000000000000000000000000000000000000000000000000";
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         println!("Encoded: {:?}", encoded);
         assert_eq!(hex::encode(&encoded), expected_encoded);
 
@@ -459,15 +459,15 @@ mod tests {
     #[test]
     fn test_u32_encode_decode_le() {
         let original: u32 = 0x12345678;
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
 
         original
-            .encode::<LittleEndian, 8, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 8, false>(&mut buf, 0)
             .unwrap();
 
-        assert_eq!(buffer.to_vec(), vec![0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0]);
+        assert_eq!(buf.to_vec(), vec![0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0]);
 
-        let mut buf_for_decode = buffer.clone().freeze();
+        let mut buf_for_decode = buf.clone().freeze();
         let decoded = u32::decode::<LittleEndian, 4, false>(&mut buf_for_decode, 0).unwrap();
 
         assert_eq!(original, decoded);
@@ -476,13 +476,11 @@ mod tests {
     #[test]
     fn test_u32_encode_decode_be() {
         let original: u32 = 0x12345678;
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
 
-        original
-            .encode::<BigEndian, 8, false>(&mut buffer, 0)
-            .unwrap();
+        original.encode::<BigEndian, 8, false>(&mut buf, 0).unwrap();
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         println!("{:?}", hex::encode(&encoded));
         assert_eq!(
             &encoded,
@@ -497,13 +495,11 @@ mod tests {
     #[test]
     fn test_i64_encode_decode_be() {
         let original: i64 = 0x1234567890ABCDEF;
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
 
-        original
-            .encode::<BigEndian, 8, false>(&mut buffer, 0)
-            .unwrap();
+        original.encode::<BigEndian, 8, false>(&mut buf, 0).unwrap();
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         println!("Encoded: {:?}", hex::encode(&encoded));
         assert_eq!(
             &encoded,
@@ -519,12 +515,12 @@ mod tests {
     #[test]
     fn test_option_u32_encode_decode() {
         let original: Option<u32> = Some(0x12345678);
-        let mut buffer = BytesMut::with_capacity(8);
+        let mut buf = BytesMut::with_capacity(8);
 
-        let ok = original.encode::<LittleEndian, 4, false>(&mut buffer, 0);
+        let ok = original.encode::<LittleEndian, 4, false>(&mut buf, 0);
         assert!(ok.is_ok());
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         println!("Encoded: {:?}", &encoded.to_vec());
         assert_eq!(
             encoded,
@@ -539,13 +535,13 @@ mod tests {
     #[test]
     fn test_u8_array_encode_decode_le_with_alignment() {
         let original: [u8; 5] = [1, 2, 3, 4, 5];
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
 
         original
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         println!("Encoded: {:?}", hex::encode(&encoded));
 
         // Check that the encoded data is correct and properly aligned
@@ -570,13 +566,13 @@ mod tests {
     #[test]
     fn test_u32_array_encode_decode_le_with_alignment() {
         let original: [u32; 5] = [1, 2, 3, 4, 5];
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
 
         original
-            .encode::<LittleEndian, 8, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 8, false>(&mut buf, 0)
             .unwrap();
 
-        let mut encoded = buffer.freeze();
+        let mut encoded = buf.freeze();
         println!("Encoded: {:?}", hex::encode(&encoded));
 
         // Check that the encoded data is correct and properly aligned

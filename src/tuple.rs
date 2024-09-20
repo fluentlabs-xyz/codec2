@@ -16,14 +16,14 @@ impl<T: Encoder> Encoder for (T,) {
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
         Ok((T::decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)?,))
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &impl Buf,
+        buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         T::partial_decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
@@ -50,7 +50,7 @@ macro_rules! impl_encoder_for_tuple {
             }
 
             fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-                buf: &impl Buf,
+                buf: &(impl Buf + ?Sized),
                 offset: usize,
             ) -> Result<Self, CodecError> {
                 let aligned_offset = align_up::<ALIGN>(offset);
@@ -65,7 +65,7 @@ macro_rules! impl_encoder_for_tuple {
             }
 
             fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-                buf: &impl Buf,
+                buf: &(impl Buf + ?Sized),
                 offset: usize,
             ) -> Result<(usize, usize), CodecError> {
                 let aligned_offset = align_up::<ALIGN>(offset);
@@ -99,12 +99,12 @@ mod tests {
     #[test]
     fn test_single_element_tuple() {
         let original: (u32,) = (100u32,);
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         original
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
 
-        let encoded = buffer.freeze();
+        let encoded = buf.freeze();
         assert_eq!(hex::encode(&encoded), "64000000");
 
         let decoded = <(u32,)>::decode::<LittleEndian, 4, false>(&mut encoded.clone(), 0).unwrap();
@@ -115,12 +115,12 @@ mod tests {
     fn test_simple_tuple() {
         type Tuple = (u32, u16);
         let original: Tuple = (100u32, 20u16);
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         original
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
 
-        let encoded = buffer.freeze();
+        let encoded = buf.freeze();
         println!("{:?}", encoded);
         assert_eq!(hex::encode(&encoded), "6400000014000000");
 
@@ -132,12 +132,12 @@ mod tests {
     fn test_big_tuple() {
         type Tuple = (u32, u16, u8, u64, u32, u16, u8, u64);
         let original: Tuple = (100u32, 20u16, 30u8, 40u64, 50u32, 60u16, 70u8, 80u64);
-        let mut buffer = BytesMut::new();
+        let mut buf = BytesMut::new();
         original
-            .encode::<LittleEndian, 4, false>(&mut buffer, 0)
+            .encode::<LittleEndian, 4, false>(&mut buf, 0)
             .unwrap();
 
-        let encoded = buffer.freeze();
+        let encoded = buf.freeze();
         println!("{:?}", hex::encode(&encoded));
         assert_eq!(
             hex::encode(&encoded),

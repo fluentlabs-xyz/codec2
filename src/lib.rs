@@ -1,3 +1,4 @@
+pub mod bytes;
 pub mod empty;
 pub mod encoder;
 pub mod error;
