@@ -79,7 +79,8 @@ fn read_bytes_solidity<B: ByteOrder, const ALIGN: usize>(
     offset: usize,
 ) -> Result<Bytes, CodecError> {
     let (data_offset, data_len) = read_bytes_header::<B, ALIGN, true>(buf, offset)?;
-    println!("Data Offset: {}, Data Length: {}", data_offset, data_len);
+    println!(">>>Data Offset: {}, Data Length: {}", data_offset, data_len);
+
     let data_offset = data_offset + ALIGN; // Skip data_len header element
     let data = buf.chunk()[data_offset..data_offset + data_len].to_vec();
     Ok(Bytes::from(data))
@@ -103,18 +104,29 @@ fn read_bytes_header_solidity<B: ByteOrder, const ALIGN: usize>(
     let aligned_offset = align_up::<ALIGN>(offset);
     let aligned_elem_size = align_up::<ALIGN>(DEFAULT_HEADER_ELEM_SIZE);
 
-    if buf.remaining() < aligned_offset + aligned_elem_size * 2 {
+    println!(
+        "Aligned Offset: {}, Aligned Elem Size: {}",
+        aligned_offset, aligned_elem_size
+    );
+
+    if buf.remaining() < aligned_offset + aligned_elem_size {
         return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-            expected: aligned_offset + aligned_elem_size * 2,
+            expected: aligned_offset + aligned_elem_size,
             found: buf.remaining(),
-            msg: "buf too small to read bytes header".to_string(),
+            msg: "buf too small to read bytes header for solidity".to_string(),
         }));
     }
 
     // Read data offset and data length from the buf for Solidity ABI
     let data_offset = read_u32_aligned::<B, ALIGN, true>(buf, aligned_offset) as usize;
-    let data_len =
-        read_u32_aligned::<B, ALIGN, true>(buf, aligned_offset + aligned_elem_size) as usize;
+
+    println!("Data Offset: {}", data_offset);
+    println!("buf: {:?}", &buf.chunk());
+    println!(
+        "aligned_offset+ aligned_elem_size: {}",
+        aligned_offset + aligned_elem_size
+    );
+    let data_len = read_u32_aligned::<B, ALIGN, true>(buf, data_offset) as usize;
 
     Ok((data_offset, data_len))
 }

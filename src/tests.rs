@@ -94,6 +94,55 @@ fn test_vec_simple() {
     assert_eq!(hex::encode(encoded), hex::encode(alloy_value));
 }
 
+#[test]
+fn test_empty_vector() {
+    let empty_vec: Vec<u32> = vec![];
+
+    let mut buf = BytesMut::new();
+    SolidityABI::<Vec<u32>>::encode(&empty_vec, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
+
+    let alloy_value = sol_data::Array::<sol_data::Uint<32>>::abi_encode(&empty_vec);
+
+    assert_eq!(encoded, alloy_value);
+
+    let decoded = SolidityABI::<Vec<u32>>::decode(&&alloy_value[..], 0).unwrap();
+    assert_eq!(decoded, empty_vec);
+}
+#[test]
+fn test_empty_bytes_solidity() {
+    let original: alloy_primitives::Bytes = alloy_primitives::Bytes::new();
+    let mut buf = BytesMut::new();
+
+    SolidityABI::<alloy_primitives::Bytes>::encode(&original, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
+
+    println!("Encoded Bytes: {:?}", hex::encode(&encoded));
+
+    let alloy_encoded = sol_data::Bytes::abi_encode(&original);
+
+    assert_eq!(encoded, alloy_encoded);
+
+    let decoded = SolidityABI::<alloy_primitives::Bytes>::decode(&&alloy_encoded[..], 0).unwrap();
+
+    assert_eq!(original, decoded);
+}
+
+#[test]
+fn test_vec_partial_decode() {
+    let original: Vec<u32> = vec![1u32, 2, 3, 4, 5];
+    let mut buf = BytesMut::new();
+    SolidityABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
+
+    let alloy_value = sol_data::Array::<sol_data::Uint<32>>::abi_encode(&original);
+
+    assert_eq!(hex::encode(encoded), hex::encode(&alloy_value));
+
+    let decoded = SolidityABI::<Vec<u32>>::partial_decode(&&alloy_value[..], 0).unwrap();
+
+    println!("Decoded: {:?}", decoded);
+}
 // #[test]
 // fn test_simple_map() {
 //     let mut original = HashMap::new();

@@ -45,42 +45,11 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
         buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let aligned_header_el_size = align_up::<ALIGN>(4);
-
-        if buf.remaining() < aligned_offset + aligned_header_el_size {
-            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_header_el_size,
-                found: buf.remaining(),
-                msg: "failed to decode vector length".to_string(),
-            }));
+        if SOLIDITY_COMP {
+            decode_vec_solidity::<B, T, ALIGN>(buf, offset)
+        } else {
+            decode_vec_wasm::<B, T, ALIGN>(buf, offset)
         }
-
-        let data_len = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset) as usize;
-        if data_len == 0 {
-            return Ok(Vec::new());
-        }
-
-        let input_bytes =
-            read_bytes::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + aligned_header_el_size)
-                .unwrap();
-
-        let mut result = Vec::with_capacity(data_len);
-
-        // Aligned value size
-        let val_size = align_up::<ALIGN>(T::HEADER_SIZE);
-
-        for i in 0..data_len {
-            let elem_offset = i * val_size;
-            // clone - copy only pointer to the buf
-            // we can't pass whole buf, because some decoders (primitive types f.e.) can consume it
-            let mut input_bytes = input_bytes.clone();
-            let value = T::decode::<B, ALIGN, SOLIDITY_COMP>(&mut input_bytes, elem_offset)?;
-
-            result.push(value);
-        }
-
-        Ok(result)
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
@@ -227,6 +196,95 @@ fn encode_vector_wasm<
     );
 
     Ok(())
+}
+
+fn decode_vec_wasm<
+    B: ByteOrder,
+    T: Default + Sized + Encoder + std::fmt::Debug,
+    const ALIGN: usize,
+>(
+    buf: &(impl Buf + ?Sized),
+    offset: usize,
+) -> Result<Vec<T>, CodecError> {
+    let aligned_offset = align_up::<ALIGN>(offset);
+    let aligned_header_el_size = align_up::<ALIGN>(4);
+
+    if buf.remaining() < aligned_offset + aligned_header_el_size {
+        return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+            expected: aligned_offset + aligned_header_el_size,
+            found: buf.remaining(),
+            msg: "failed to decode vector length".to_string(),
+        }));
+    }
+
+    let data_len = read_u32_aligned::<B, ALIGN, false>(buf, aligned_offset) as usize;
+    if data_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let input_bytes = read_bytes::<B, ALIGN, false>(buf, aligned_offset + aligned_header_el_size)?;
+
+    decode_elements::<B, T, ALIGN, false>(&input_bytes, data_len)
+}
+
+fn decode_vec_solidity<
+    B: ByteOrder,
+    T: Default + Sized + Encoder + std::fmt::Debug,
+    const ALIGN: usize,
+>(
+    buf: &(impl Buf + ?Sized),
+    offset: usize,
+) -> Result<Vec<T>, CodecError> {
+    let aligned_offset = align_up::<ALIGN>(offset);
+    let aligned_header_el_size = align_up::<ALIGN>(4);
+
+    if buf.remaining() < aligned_offset {
+        return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+            expected: aligned_offset,
+            found: buf.remaining(),
+            msg: "failed to decode vector offset".to_string(),
+        }));
+    }
+
+    let data_offset = read_u32_aligned::<B, ALIGN, true>(buf, aligned_offset) as usize;
+    if buf.remaining() < data_offset + aligned_header_el_size {
+        return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+            expected: data_offset + aligned_header_el_size,
+            found: buf.remaining(),
+            msg: "failed to decode vector length".to_string(),
+        }));
+    }
+
+    let data_len = read_u32_aligned::<B, ALIGN, true>(buf, data_offset) as usize;
+    if data_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let input_bytes = read_bytes::<B, ALIGN, true>(buf, data_offset + aligned_header_el_size)?;
+
+    decode_elements::<B, T, ALIGN, true>(&input_bytes, data_len)
+}
+
+fn decode_elements<
+    B: ByteOrder,
+    T: Default + Sized + Encoder + std::fmt::Debug,
+    const ALIGN: usize,
+    const SOLIDITY_COMP: bool,
+>(
+    input_bytes: &[u8],
+    data_len: usize,
+) -> Result<Vec<T>, CodecError> {
+    let mut result = Vec::with_capacity(data_len);
+    let val_size = align_up::<ALIGN>(T::HEADER_SIZE);
+
+    for i in 0..data_len {
+        let elem_offset = i * val_size;
+        let mut input_bytes = input_bytes;
+        let value = T::decode::<B, ALIGN, SOLIDITY_COMP>(&mut input_bytes, elem_offset)?;
+        result.push(value);
+    }
+
+    Ok(result)
 }
 #[cfg(test)]
 mod tests {
