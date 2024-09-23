@@ -1,7 +1,7 @@
 use std::usize;
 
 use crate::bytes::{read_bytes, read_bytes_header, write_bytes};
-use crate::encoder::{align_up, is_big_endian, write_u32_aligned, Encoder};
+use crate::encoder::{align, align_up, is_big_endian, write_u32_aligned, Encoder};
 use crate::error::{CodecError, DecodingError};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use byteorder::ByteOrder;
@@ -85,16 +85,44 @@ macro_rules! impl_evm_fixed {
                 buf: &mut BytesMut,
                 offset: usize,
             ) -> Result<(), CodecError> {
-                self.0.encode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
+                let aligned_offset = align_up::<ALIGN>(offset);
+                let word_size = align_up::<ALIGN>(ALIGN.max(Self::HEADER_SIZE));
+
+                if buf.len() < aligned_offset + word_size {
+                    buf.resize(aligned_offset + word_size, 0);
+                }
+
+                let bytes: &[u8] = self.0.as_ref();
+                let aligned_value = align::<B, ALIGN, SOLIDITY_COMP>(bytes);
+                buf[aligned_offset..aligned_offset + word_size].copy_from_slice(&aligned_value);
+                Ok(())
             }
 
             fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
                 buf: &(impl Buf + ?Sized),
                 offset: usize,
             ) -> Result<Self, CodecError> {
-                let inner = FixedBytes::<{ Self::HEADER_SIZE }>::decode::<B, ALIGN, SOLIDITY_COMP>(
-                    buf, offset,
-                )?;
+                let aligned_offset = align_up::<ALIGN>(offset);
+                let word_size = align_up::<ALIGN>(ALIGN.max(Self::HEADER_SIZE));
+
+                if buf.remaining() < aligned_offset + word_size {
+                    return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                        expected: aligned_offset + word_size,
+                        found: buf.remaining(),
+                        msg: format!("buf too small to read aligned {}", stringify!($typ)),
+                    }));
+                }
+
+                let chunk = &buf.chunk()[aligned_offset..aligned_offset + word_size];
+
+                let inner = if is_big_endian::<B>() {
+                    FixedBytes::<{ Self::HEADER_SIZE }>::from_slice(
+                        &chunk[word_size - Self::HEADER_SIZE..],
+                    )
+                } else {
+                    FixedBytes::<{ Self::HEADER_SIZE }>::from_slice(&chunk[..Self::HEADER_SIZE])
+                };
+
                 Ok(Self(inner))
             }
 
@@ -102,7 +130,9 @@ macro_rules! impl_evm_fixed {
                 _buf: &(impl Buf + ?Sized),
                 offset: usize,
             ) -> Result<(usize, usize), CodecError> {
-                Ok((offset, Self::HEADER_SIZE))
+                let aligned_offset = align_up::<ALIGN>(offset);
+                let word_size = align_up::<ALIGN>(ALIGN.max(Self::HEADER_SIZE));
+                Ok((aligned_offset, word_size))
             }
         }
     };
@@ -228,12 +258,14 @@ mod tests {
         let original = Address::from([0x42; 20]);
         let mut buf = BytesMut::new();
 
-        original.encode::<BigEndian, 8, false>(&mut buf, 3).unwrap();
+        original
+            .encode::<LittleEndian, 32, true>(&mut buf, 0)
+            .unwrap();
 
         let encoded = buf.freeze();
-        println!("Encoded Address (Aligned): {}", hex::encode(&encoded));
+        println!("Encoded Address: {}", hex::encode(&encoded));
 
-        let decoded = Address::decode::<BigEndian, 8, false>(&mut encoded.clone(), 3).unwrap();
+        let decoded = Address::decode::<LittleEndian, 32, true>(&mut encoded.clone(), 0).unwrap();
 
         assert_eq!(original, decoded);
     }

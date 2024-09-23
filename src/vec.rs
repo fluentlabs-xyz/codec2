@@ -67,15 +67,7 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
             }));
         }
 
-        let vec_len = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset) as usize;
-
-        let (data_offset, data_length) = if vec_len == 0 {
-            (0, 0)
-        } else {
-            read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + elem_size).unwrap()
-        };
-
-        Ok((data_offset, data_length))
+        read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)
     }
 }
 

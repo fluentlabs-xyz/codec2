@@ -5,6 +5,7 @@ use alloy_sol_types::{
 };
 use bytes::{Buf, BufMut, BytesMut};
 use hashbrown::HashMap;
+use hex_literal::hex;
 
 use crate::encoder::{SolidityABI, WasmABI};
 
@@ -139,9 +140,32 @@ fn test_vec_partial_decode() {
 
     assert_eq!(hex::encode(encoded), hex::encode(&alloy_value));
 
-    let decoded = SolidityABI::<Vec<u32>>::partial_decode(&&alloy_value[..], 0).unwrap();
+    // offset, length
+    let decoded_header = SolidityABI::<Vec<u32>>::partial_decode(&&alloy_value[..], 0).unwrap();
 
-    println!("Decoded: {:?}", decoded);
+    assert_eq!(decoded_header, (32, 5));
+}
+
+#[test]
+fn test_address_encoding() {
+    let original =
+        alloy_primitives::Address::from(hex!("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266"));
+
+    let mut buf = BytesMut::new();
+    SolidityABI::<alloy_primitives::Address>::encode(&original, &mut buf, 0).unwrap();
+
+    let encoded = buf.freeze();
+
+    let alloy_encoded = sol_data::Address::abi_encode(&original);
+
+    assert_eq!(encoded.to_vec(), alloy_encoded);
+
+    let decoded = SolidityABI::<alloy_primitives::Address>::decode(&&alloy_encoded[..], 0).unwrap();
+
+    let alloy_decoded = sol_data::Address::abi_decode(&alloy_encoded, false).unwrap();
+
+    assert_eq!(decoded, alloy_decoded);
+    assert_eq!(decoded, original);
 }
 // #[test]
 // fn test_simple_map() {
