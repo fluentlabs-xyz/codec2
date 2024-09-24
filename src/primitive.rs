@@ -122,6 +122,9 @@ macro_rules! impl_int {
                 buf: &(impl Buf + ?Sized),
                 offset: usize,
             ) -> Result<Self, CodecError> {
+                println!(">>>333 buf: {:?}", &buf.chunk()[..]);
+                println!(">>>333 offset: {:?}", offset);
+
                 let aligned_offset = align_up::<ALIGN>(offset);
                 let word_size = align_up::<ALIGN>(ALIGN.max(Self::HEADER_SIZE));
 
@@ -129,7 +132,7 @@ macro_rules! impl_int {
                     return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
                         expected: aligned_offset + ALIGN,
                         found: buf.remaining(),
-                        msg: "buf too small".to_string(),
+                        msg: "buf too small to decode value".to_string(),
                     }));
                 }
 

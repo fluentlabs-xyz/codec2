@@ -51,7 +51,7 @@ impl Encoder for EmptyVec {
             }));
         }
 
-        let count = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset);
+        let count = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)?;
         if count != 0 {
             return Err(CodecError::Decoding(DecodingError::InvalidData(
                 "EmptyVec must have count of 0".to_string(),
@@ -60,12 +60,12 @@ impl Encoder for EmptyVec {
 
         // Read and verify offset and length
         let data_offset =
-            read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + aligned_elem_size)
+            read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + aligned_elem_size)?
                 as usize;
         let data_length = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(
             buf,
             aligned_offset + aligned_elem_size * 2,
-        ) as usize;
+        )? as usize;
 
         if data_offset != Self::HEADER_SIZE || data_length != 0 {
             return Err(CodecError::Decoding(DecodingError::InvalidData(
@@ -91,7 +91,7 @@ impl Encoder for EmptyVec {
             }));
         }
 
-        let count = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset);
+        let count = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)?;
         if count != 0 {
             return Err(CodecError::Decoding(DecodingError::InvalidData(
                 "EmptyVec must have count of 0".to_string(),
@@ -99,12 +99,12 @@ impl Encoder for EmptyVec {
         }
 
         let data_offset =
-            read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + aligned_elem_size)
+            read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + aligned_elem_size)?
                 as usize;
         let data_length = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(
             buf,
             aligned_offset + aligned_elem_size * 2,
-        ) as usize;
+        )? as usize;
 
         Ok((data_offset, data_length))
     }

@@ -116,19 +116,20 @@ where
         entries.sort_by(|a, b| a.0.cmp(b.0));
 
         // Encode and write keys (we can't write values, as we need to store all keys first(including nested))
-
         let mut key_buf = BytesMut::zeroed(align_up::<ALIGN>(K::HEADER_SIZE) * self.len());
 
         for (i, (key, _)) in entries.iter().enumerate() {
             let key_offset = align_up::<ALIGN>(K::HEADER_SIZE) * i;
-            key.encode::<B, ALIGN, SOLIDITY_COMP>(&mut key_buf, key_offset)
-                .unwrap();
+            key.encode::<B, ALIGN, SOLIDITY_COMP>(&mut key_buf, key_offset)?;
+            println!(">>>key buf: {:?}", key_buf.chunk());
         }
 
+        // write keys header and keys data
         write_bytes::<B, ALIGN, SOLIDITY_COMP>(
             buf,
             aligned_offset + aligned_header_el_size,
             &key_buf,
+            entries.len() as u32,
         );
 
         let mut value_buf = BytesMut::zeroed(align_up::<ALIGN>(V::HEADER_SIZE) * self.len());
@@ -140,10 +141,18 @@ where
                 .unwrap();
         }
 
+        println!(
+            "encode values offset: {}",
+            aligned_offset + aligned_header_el_size * 3
+        );
+        println!("encoded values length: {}", value_buf.len());
+        println!("encoded buf befor values: {:?}", buf.chunk());
+
         write_bytes::<B, ALIGN, SOLIDITY_COMP>(
             buf,
             aligned_offset + aligned_header_el_size * 3,
             &value_buf,
+            entries.len() as u32,
         );
 
         Ok(())
@@ -154,7 +163,12 @@ where
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_el_size = align_up::<ALIGN>(4);
         let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+        println!(
+            "aligned_offset: {}, aligned_header_size: {}",
+            aligned_offset, aligned_header_size
+        );
 
         if buf.remaining() < aligned_offset + aligned_header_size {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
@@ -164,19 +178,26 @@ where
             }));
         }
 
-        let length = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset) as usize;
+        let length = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)? as usize;
 
+        println!("length: {}", length);
         let (keys_offset, keys_length) = read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(
             buf,
-            aligned_offset + align_up::<ALIGN>(4),
+            aligned_offset + aligned_header_el_size,
         )
         .unwrap();
+        println!("keys_offset: {}, keys_length: {}", keys_offset, keys_length);
+
         let (values_offset, values_length) = read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(
             buf,
-            aligned_offset + align_up::<ALIGN>(12),
+            aligned_offset + aligned_header_el_size * 3,
         )
         .unwrap();
 
+        println!(
+            "values_offset: {}, values_length: {}",
+            values_offset, values_length
+        );
         let mut result = HashMap::with_capacity(length);
 
         let key_bytes = &buf.chunk()[keys_offset..keys_offset + keys_length];
@@ -274,6 +295,7 @@ where
             buf,
             aligned_offset + aligned_header_el_size,
             &value_buf,
+            entries.len() as u32,
         );
 
         Ok(())
@@ -294,7 +316,7 @@ where
             }));
         }
 
-        let length = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset) as usize;
+        let length = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)? as usize;
 
         let (data_offset, data_length) = read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(
             buf,
@@ -345,87 +367,6 @@ where
         Ok((data_offset, data_length))
     }
 }
-// impl<T: Default + Sized + Encoder<T> + Eq + Hash + Ord> Encoder<HashSet<T>> for HashSet<T> {
-//     // length (4) + keys (8) (bytes)
-//     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
-
-//     fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(&self, buf: &mut BytesMut, offset: usize) {
-//         let aligned_offset = A::align(offset);
-
-//         if buf.len() < aligned_offset + 4 {
-//             buf.resize(aligned_offset + 4, 0);
-//         }
-
-//         // HashSet size
-//         E::write::<u32>(
-//             &mut buf[aligned_offset..aligned_offset + 4],
-//             self.len() as u32,
-//         );
-
-//         // Make sure set is sorted
-//         let mut entries: Vec<_> = self.iter().collect();
-//         entries.sort();
-
-//         // Encode values
-//         let mut value_buffer = BytesMut::zeroed(A::SIZE.max(T::HEADER_SIZE) * self.len());
-//         for (i, obj) in entries.iter().enumerate() {
-//             let offset = A::SIZE.max(T::HEADER_SIZE) * i;
-//             obj.encode::<A, E>(&mut value_buffer, offset);
-//         }
-
-//         // Write values
-//         write_bytes::<A, E>(buf, aligned_offset + 4, &value_buffer);
-//     }
-
-//     fn decode_header<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-//         bytes: &Bytes,
-//         field_offset: usize,
-//         result: &mut HashSet<T>,
-//     ) -> (usize, usize) {
-//         let aligned_offset = A::align(field_offset);
-
-//         if bytes.remaining() < aligned_offset + 4 {
-//             return (0, 0);
-//         }
-
-//         let count = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
-
-//         if count == 0 {
-//             result.clear();
-//             return (0, 0);
-//         }
-
-//         result.reserve(count);
-
-//         let (data_offset, data_length) = read_bytes_header::<A, E>(bytes, aligned_offset + 4);
-
-//         (data_offset, data_length)
-//     }
-
-//     fn decode_body<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-//         bytes: &Bytes,
-//         offset: usize,
-//         result: &mut HashSet<T>,
-//     ) {
-//         let aligned_offset = A::align(offset);
-//         let count = E::read::<u32>(&bytes[aligned_offset..aligned_offset + 4]) as usize;
-
-//         if count == 0 {
-//             result.clear();
-//             return;
-//         }
-
-//         let value_bytes = read_bytes::<A, E>(bytes, aligned_offset + 4);
-
-//         let elem_size = A::SIZE.max(T::HEADER_SIZE);
-
-//         for i in 0..count {
-//             let mut value = T::default();
-//             T::decode_body::<A, E>(&value_bytes, elem_size * i, &mut value);
-//             result.insert(value);
-//         }
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
@@ -468,7 +409,25 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_map() {
+    fn test_simple_map_a8() {
+        let mut values = HashMap::new();
+        values.insert(100, 20);
+        values.insert(3, 5);
+        values.insert(1000, 60);
+        let mut buf = BytesMut::new();
+        values
+            .encode::<LittleEndian, 8, false>(&mut buf, 0)
+            .unwrap();
+        let result = buf.freeze();
+
+        let encoded_hex = hex::encode(&result);
+        println!("Encoded: {}", encoded_hex);
+
+        let decoded = HashMap::<i32, i32>::decode::<LittleEndian, 8, false>(&result, 0).unwrap();
+        assert_eq!(values, decoded);
+    }
+    #[test]
+    fn test_simple_map_wasm() {
         let mut values = HashMap::new();
         values.insert(100, 20);
         values.insert(3, 5);

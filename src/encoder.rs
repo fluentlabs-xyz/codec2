@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{f32::consts::E, marker::PhantomData};
 
 use byteorder::{ByteOrder, BE, LE};
 use bytes::{Buf, Bytes, BytesMut};
@@ -75,7 +75,7 @@ pub struct EncoderMode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bo
 }
 
 pub type SolidityEncoderMode = EncoderMode<BE, 32, true>;
-pub type WasmEncoderMode = EncoderMode<LE, 8, false>;
+pub type WasmEncoderMode = EncoderMode<LE, 4, false>;
 
 pub struct EncoderModeAdapter<T, M>(PhantomData<(T, M)>);
 
@@ -171,15 +171,25 @@ pub fn write_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: 
 pub fn read_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
     buf: &(impl Buf + ?Sized),
     offset: usize,
-) -> u32 {
+) -> Result<u32, CodecError> {
     let aligned_value_size = align_up::<ALIGN>(4);
 
     if is_big_endian::<B>() {
         // For big-endian, copy from the end of the aligned array
         let start = offset + aligned_value_size - 4;
-        B::read_u32(&buf.chunk()[start..])
+        if buf.remaining() < start + 4 {
+            return Err(CodecError::Decoding(
+                crate::error::DecodingError::BufferTooSmall {
+                    expected: start + 4,
+                    found: buf.remaining(),
+                    msg: "failed to aligned read u32".to_string(),
+                },
+            ));
+        }
+
+        Ok(B::read_u32(&buf.chunk()[start..start + 4]))
     } else {
         // For little-endian, copy from the start of the aligned array
-        B::read_u32(&buf.chunk()[offset..offset + 4])
+        Ok(B::read_u32(&buf.chunk()[offset..offset + 4]))
     }
 }

@@ -1,7 +1,9 @@
 use std::usize;
 
 use crate::bytes::{read_bytes, read_bytes_header, write_bytes};
-use crate::encoder::{align, align_up, is_big_endian, write_u32_aligned, Encoder};
+use crate::encoder::{
+    align, align_up, is_big_endian, read_u32_aligned, write_u32_aligned, Encoder,
+};
 use crate::error::{CodecError, DecodingError};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use byteorder::ByteOrder;
@@ -20,10 +22,16 @@ impl Encoder for Bytes {
         if buf.len() < aligned_offset + elem_size {
             buf.resize(aligned_offset + elem_size, 0);
         }
-        let data_offset = buf.len();
 
-        write_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset, data_offset as u32);
-        let _ = write_bytes::<B, ALIGN, SOLIDITY_COMP>(buf, offset, self);
+        write_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset, buf.len() as u32);
+        let _ = write_bytes::<B, ALIGN, SOLIDITY_COMP>(buf, offset, self, self.len() as u32);
+
+        // Ensure the buffer is aligned
+        if buf.len() % ALIGN != 0 {
+            let padding = ALIGN - (buf.len() % ALIGN);
+            buf.resize(buf.len() + padding, 0);
+        }
+
         Ok(())
     }
 
@@ -31,16 +39,35 @@ impl Encoder for Bytes {
         buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<Self, CodecError> {
-        Ok(Self::from(
-            read_bytes::<B, ALIGN, SOLIDITY_COMP>(buf, offset).unwrap(),
-        ))
+        let aligned_offset = align_up::<ALIGN>(offset);
+
+        let (data_offset, _data_size) =
+            Self::partial_decode::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)?;
+
+        let data = read_bytes::<B, ALIGN, SOLIDITY_COMP>(buf, data_offset, 1)?;
+
+        Ok(Self::from(data))
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
-        read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let res = if SOLIDITY_COMP {
+            let data_offset =
+                read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)? as usize;
+            let data_size = read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, data_offset)? as usize;
+            Ok((data_offset, data_size))
+        } else {
+            let data_offset =
+                read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)? as usize;
+            let data_size =
+                read_u32_aligned::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + 4)? as usize;
+            Ok((data_offset, data_size))
+        };
+
+        res
     }
 }
 
@@ -217,7 +244,8 @@ mod tests {
 
         let original = Bytes::from_static(b"Hello, World");
         // Write the data to the buf
-        let _result = write_bytes::<BigEndian, 8, false>(&mut buf, 16, &original);
+        let _result =
+            write_bytes::<BigEndian, 8, false>(&mut buf, 16, &original, (original.len() as u32));
 
         let expected = [
             0, 0, 0, 0, 0, 0, 0, 32, // offset of the 1st bytes
@@ -232,7 +260,7 @@ mod tests {
 
         let mut encoded = buf.freeze();
 
-        let decoded = read_bytes::<BigEndian, 8, false>(&mut encoded, 0).unwrap();
+        let decoded = read_bytes::<BigEndian, 8, false>(&mut encoded, 0, original.len()).unwrap();
 
         assert_eq!(decoded.to_vec(), original.to_vec());
     }
