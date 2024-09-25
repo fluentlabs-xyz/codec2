@@ -8,12 +8,6 @@ use crate::{
     error::{CodecError, DecodingError},
 };
 
-// pub type WasmEncoderMode = EncoderMode<LE, 4, false>;
-
-pub trait HeaderSized {
-    const HEADER_SIZE: usize;
-}
-
 /// Trait for encoding and decoding values with specific byte order, alignment, and mode.
 ///
 /// # Type Parameters
@@ -21,16 +15,8 @@ pub trait HeaderSized {
 /// - `ALIGN`: The alignment requirement for the encoded data.
 /// - `SOL_MODE`: A boolean flag indicating whether Solidity-compatible mode is enabled.
 pub trait Encoder<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>: Sized {
-    const HEADER_SIZE: usize;
     /// Returns the header size for this encoder.
-    ///
-    /// This method provides a convenient way to access the header size,
-    /// which is defined by the associated `HeaderSize` type.
-    ///
-    /// We use header_size method instead of a const
-    /// `HEADER_SIZE` because traits with generic associated types (GATs) cannot
-    /// have associated constants that depend on those types.
-    // fn header_size() -> usize;
+    const HEADER_SIZE: usize;
 
     /// Encodes the value into the given buffer at the specified offset.
     ///
@@ -52,15 +38,14 @@ pub trait Encoder<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>: Sized
     /// The decoded value if successful, or an error if decoding failed.
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError>;
 
-    /// Partially decodes the header to determine the size and offset of the encoded data.
+    /// Partially decodes the header to determine the length and offset of the encoded data.
     ///
     /// # Arguments
     /// * `buf` - The buffer to decode from.
     /// * `offset` - The starting offset in the buffer for decoding.
     ///
     /// # Returns
-    /// A tuple `(size, data_offset)` where `size` is the total size of the encoded data
-    /// and `data_offset` is the offset to the actual data (after the header).
+    /// A tuple `(data_offset, data_length)` if successful, or an error if decoding failed.
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError>;
 
     /// Calculates the number of bytes needed to encode the value.
@@ -155,7 +140,7 @@ impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, S
         Ok(value)
     }
 
-    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+    fn partial_decode(_buf: &impl Buf, _offset: usize) -> Result<(usize, usize), CodecError> {
         Ok((0, <Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE))
     }
 }
@@ -170,11 +155,17 @@ mod tests {
         let value: u8 = 0x1;
         let mut buf = BytesMut::new();
         SolidityABI::encode(&value, &mut buf, 0).unwrap();
-        let encoded = buf.freeze();
-
-        println!("Encoded: {:?}", encoded);
+        println!(
+            "Encoded with SolidityABI: {:?}",
+            hex::encode(&buf.chunk()[..])
+        );
 
         let mut buf = BytesMut::new();
         WasmABI::encode(&value, &mut buf, 0).unwrap();
+        println!("Encoded with WasmABI: {:?}", hex::encode(&buf.chunk()[..]));
+
+        // Expected output:
+        // Encoded with SolidityABI: "0000000000000000000000000000000000000000000000000000000000000001"
+        // Encoded with WasmABI: "01000000"
     }
 }
