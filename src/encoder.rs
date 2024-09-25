@@ -174,6 +174,8 @@ pub fn read_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: b
 ) -> Result<u32, CodecError> {
     let aligned_value_size = align_up::<ALIGN>(4);
 
+    // TODO: "add overflow check"
+
     if is_big_endian::<B>() {
         // For big-endian, copy from the end of the aligned array
         let start = offset + aligned_value_size - 4;

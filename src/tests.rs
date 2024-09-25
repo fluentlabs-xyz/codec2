@@ -1,11 +1,10 @@
 use std::vec;
 
-use alloy_primitives::{Uint, U256};
 use alloy_sol_types::{
     sol_data::{self},
     SolType, SolValue,
 };
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BytesMut};
 use hashbrown::HashMap;
 use hex_literal::hex;
 
@@ -79,9 +78,9 @@ fn test_solidity_abi_bytes_encoding() {
 
 #[test]
 fn test_vec_solidity_abi_simple() {
-    let original: Vec<u32> = vec![1u32, 2, 3];
+    let original: Vec<u32> = vec![1, 2, 3];
     let mut buf = BytesMut::new();
-    SolidityABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
+    SolidityABI::encode(&original, &mut buf, 0).unwrap();
     let encoded = buf.freeze();
 
     let alloy_value = sol_data::Array::<sol_data::Uint<32>>::abi_encode(&original);
@@ -100,11 +99,12 @@ fn test_vec_solidity_abi_simple() {
     println!("Decoded Vec: {:?}", decoded);
     assert_eq!(decoded, original);
 }
+
 #[test]
 fn test_vec_solidity_abi_nested() {
-    let original: Vec<Vec<u32>> = vec![vec![1u32, 2, 3], vec![4, 5]];
+    let original: Vec<Vec<u32>> = vec![vec![1, 2, 3], vec![4, 5]];
     let mut buf = BytesMut::new();
-    SolidityABI::<Vec<Vec<u32>>>::encode(&original, &mut buf, 0).unwrap();
+    SolidityABI::encode(&original, &mut buf, 0).unwrap();
     let encoded = buf.freeze();
 
     let alloy_value = sol_data::Array::<sol_data::Array<sol_data::Uint<32>>>::abi_encode(&original);
@@ -121,7 +121,7 @@ fn test_vec_solidity_abi_nested() {
         &expected_encoded,
         false,
     )
-    .unwrap();
+        .unwrap();
     println!("Decoded Vec: {:?}", decoded_alloy);
 
     assert_eq!(hex::encode(encoded), hex::encode(&alloy_value));

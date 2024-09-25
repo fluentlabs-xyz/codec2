@@ -87,6 +87,11 @@ pub fn read_bytes_header<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: 
     buf: &(impl Buf + ?Sized),
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
+
+    if SOLIDITY_COMP {
+        return read_bytes_header_solidity::<B, ALIGN>(buf, offset);
+    }
+
     let aligned_offset = align_up::<ALIGN>(offset);
     let aligned_header_el_size = align_up::<ALIGN>(mem::size_of::<u32>());
 
@@ -171,38 +176,18 @@ pub fn read_bytes_solidity2<B: ByteOrder, const ALIGN: usize>(
     let data = buf.chunk()[data_offset..data_offset + data_len].to_vec();
     Ok(Bytes::from(data))
 }
+
 fn read_bytes_header_solidity<B: ByteOrder, const ALIGN: usize>(
     buf: &(impl Buf + ?Sized),
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
     let aligned_offset = align_up::<ALIGN>(offset);
-    let aligned_elem_size = align_up::<ALIGN>(4);
 
-    println!(
-        "Aligned Offset: {}, Aligned Elem Size: {}",
-        aligned_offset, aligned_elem_size
-    );
-
-    if buf.remaining() < aligned_offset + aligned_elem_size {
-        return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-            expected: aligned_offset + aligned_elem_size,
-            found: buf.remaining(),
-            msg: "buf too small to read bytes header for solidity".to_string(),
-        }));
-    }
-
-    // Read data offset and data length from the buf for Solidity ABI
     let data_offset = read_u32_aligned::<B, ALIGN, true>(buf, aligned_offset)? as usize;
+    let element_offset = data_offset + ALIGN;
+    let element_len = read_u32_aligned::<B, ALIGN, true>(buf, data_offset)? as usize;
 
-    println!("Data Offset: {}", data_offset);
-    println!("buf: {:?}", &buf.chunk());
-    println!(
-        "aligned_offset+ aligned_elem_size: {}",
-        aligned_offset + aligned_elem_size
-    );
-    let data_len = read_u32_aligned::<B, ALIGN, true>(buf, data_offset)? as usize;
-
-    Ok((data_offset, data_len))
+    Ok((element_offset, element_len))
 }
 
 pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
@@ -248,7 +233,7 @@ pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
         }));
     }
 
-    let data = buf.chunk()[actual_data_offset..actual_data_offset + data_size].to_vec();
+    let data = buf.chunk()[actual_data_offset..].to_vec();
     Ok(Bytes::from(data))
 }
 

@@ -2,7 +2,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use byteorder::ByteOrder;
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use crate::bytes::{read_bytes_solidity, read_bytes_solidity2};
 use crate::error::{CodecError, DecodingError};
@@ -116,19 +116,19 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
         let aligned_header_el_size = align_up::<ALIGN>(4);
         let val_size = ALIGN.max(T::HEADER_SIZE);
 
-        if SOLIDITY_COMP {
-            return decode_vec_solidity_nested2::<B, T, ALIGN>(buf, aligned_offset);
+        // if SOLIDITY_COMP {
+        //     return decode_vec_solidity_nested2::<B, T, ALIGN>(buf, aligned_offset);
 
             // return decode_vec_solidity::<B, T, ALIGN>(buf, offset);
-        }
+        // }
 
-        let (data_offset, data_bytes_len) =
+        let (data_offset, number_of_elements) =
             Self::partial_decode::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset)?;
 
         println!(")()(Data offset: {:?}", data_offset);
-        println!(")()(Data bytes len: {:?}", data_bytes_len);
+        println!(")()(Data bytes len: {:?}", number_of_elements);
         let data_len = if SOLIDITY_COMP {
-            data_bytes_len
+            number_of_elements
         } else {
             read_u32_aligned::<B, ALIGN, false>(buf, aligned_offset)? as usize
         };
@@ -142,22 +142,23 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
         println!("Data offset: {:?}", data_offset);
         println!("Buf {:?}", &buf.chunk()[..]);
 
-        let mut input_bytes = read_bytes::<B, ALIGN, SOLIDITY_COMP>(
-            buf,
-            aligned_offset + aligned_header_el_size,
-            val_size,
-        )?;
-        let real_values = input_bytes.to_vec();
-        println!("Real values: {:?}", real_values);
-        let mut result = Vec::with_capacity(data_bytes_len);
-        println!("Input bytes len: {:?}", input_bytes.len());
-        println!("input bytes: {:?}", input_bytes.to_vec());
+        // let mut input_bytes = read_bytes::<B, ALIGN, SOLIDITY_COMP>(
+        //     buf,
+        //     data_offset,
+        //     val_size,
+        // )?;
+        // let real_values = input_bytes.to_vec();
+        // println!("Real values: {:?}", real_values);
+        let mut result = Vec::with_capacity(number_of_elements);
+        // println!("Input bytes len: {:?}", input_bytes.len());
+        // println!("input bytes: {:?}", input_bytes.to_vec());
 
         // let mut input_bytes = input_bytes.clone();
         for i in 0..data_len {
             let elem_offset = i * align_up::<ALIGN>(T::HEADER_SIZE);
 
-            let value = T::decode::<B, ALIGN, SOLIDITY_COMP>(&mut input_bytes, elem_offset)?;
+            let input_bytes = Bytes::copy_from_slice(&buf.chunk()[data_offset..]);
+            let value = T::decode::<B, ALIGN, SOLIDITY_COMP>(&input_bytes, elem_offset)?;
 
             result.push(value);
         }
@@ -170,10 +171,7 @@ impl<T: Default + Sized + Encoder + std::fmt::Debug> Encoder for Vec<T> {
         buf: &(impl Buf + ?Sized),
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let header_aligned_el_size = align_up::<ALIGN>(4);
-
-        read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(buf, aligned_offset + header_aligned_el_size)
+        read_bytes_header::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
     }
 }
 
