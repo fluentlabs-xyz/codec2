@@ -58,8 +58,8 @@ pub trait Encoder<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>: Sized
 }
 
 #[inline]
-pub const fn align_up<const ALIGN: usize>(offset: usize) -> usize {
-    (offset + ALIGN - 1) & !(ALIGN - 1)
+pub const fn align_up<const ALIGN: usize>(val: usize) -> usize {
+    (val + ALIGN - 1) & !(ALIGN - 1)
 }
 
 macro_rules! define_encoder_mode {
@@ -153,19 +153,24 @@ mod tests {
     #[test]
     fn test_align_up() {
         let value: u8 = 0x1;
+
+        // Solidity ABI
         let mut buf = BytesMut::new();
         SolidityABI::encode(&value, &mut buf, 0).unwrap();
-        println!(
-            "Encoded with SolidityABI: {:?}",
+        assert_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000001",
             hex::encode(&buf.chunk()[..])
         );
+        let decoded_sol = SolidityABI::<u8>::decode(&buf, 0).unwrap();
 
+        // Wasm ABI
         let mut buf = BytesMut::new();
         WasmABI::encode(&value, &mut buf, 0).unwrap();
-        println!("Encoded with WasmABI: {:?}", hex::encode(&buf.chunk()[..]));
+        assert_eq!("01000000", hex::encode(&buf.chunk()[..]));
 
-        // Expected output:
-        // Encoded with SolidityABI: "0000000000000000000000000000000000000000000000000000000000000001"
-        // Encoded with WasmABI: "01000000"
+        let decoded_wasm = WasmABI::<u8>::decode(&buf, 0).unwrap();
+
+        // Ensure that the decoded values are the same
+        assert_eq!(decoded_sol, decoded_wasm);
     }
 }
