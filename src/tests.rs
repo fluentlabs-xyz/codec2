@@ -117,6 +117,13 @@ fn test_vec_solidity_abi_nested() {
 
     println!("Encoded Vec: {:?}", hex::encode(&encoded));
 
+    let decoded_alloy = sol_data::Array::<sol_data::Array<sol_data::Uint<32>>>::abi_decode(
+        &expected_encoded,
+        false,
+    )
+    .unwrap();
+    println!("Decoded Vec: {:?}", decoded_alloy);
+
     assert_eq!(hex::encode(encoded), hex::encode(&alloy_value));
 
     let decoded = SolidityABI::<Vec<Vec<u32>>>::decode(&&alloy_value[..], 0).unwrap();
