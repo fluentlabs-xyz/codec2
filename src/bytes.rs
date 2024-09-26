@@ -1,8 +1,8 @@
 extern crate alloc;
-use alloc::vec::Vec;
+
 use byteorder::ByteOrder;
 use bytes::{Buf, Bytes, BytesMut};
-use core::{marker::PhantomData, mem};
+use core::mem;
 
 use crate::{
     encoder::{align_up, read_u32_aligned, write_u32_aligned},
@@ -142,7 +142,6 @@ pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
     offset: usize,
 ) -> Result<Bytes, CodecError> {
     let (data_offset, data_len) = read_bytes_header::<B, ALIGN, SOL_MODE>(buf, offset)?;
-    println!("Data offset: {}, Data len: {}", data_offset, data_len);
 
     let data = if SOL_MODE {
         buf.chunk()[data_offset..data_offset + data_len].to_vec()

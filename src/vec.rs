@@ -106,7 +106,7 @@ where
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        read_bytes_header::<B, ALIGN, true>(buf, offset)
+        read_bytes_header::<B, ALIGN, false>(buf, offset)
     }
 }
 // Implementation forSolidity mode

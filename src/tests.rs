@@ -196,94 +196,92 @@ fn test_vec_solidity_abi_nested() {
     assert_eq!(decoded, original);
 }
 
-// #[test]
-// fn test_vec_wasm_abi() {
-//     let original: Vec<Vec<u32>> = vec![vec![1u32, 2, 3], vec![4, 5], vec![6, 7, 8, 9, 10]];
-//     let mut buf = BytesMut::new();
-//     WasmABI::<Vec<Vec<u32>>>::encode(&original, &mut buf, 0).unwrap();
-//     let encoded = buf.freeze();
+#[test]
+fn test_vec_wasm_abi() {
+    let original: Vec<Vec<u32>> = vec![vec![1u32, 2, 3], vec![4, 5], vec![6, 7, 8, 9, 10]];
+    let mut buf = BytesMut::new();
+    WasmABI::<Vec<Vec<u32>>>::encode(&original, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
 
-//     println!("Encoded Vec: {:?}", hex::encode(&encoded));
+    println!("Encoded Vec: {:?}", hex::encode(&encoded));
 
-//     let expected_encoded = hex!("030000000c0000004c00000003000000240000000c0000000200000030000000080000000500000038000000140000000100000002000000030000000400000005000000060000000700000008000000090000000a000000");
+    let expected_encoded = hex!("030000000c0000004c00000003000000240000000c0000000200000030000000080000000500000038000000140000000100000002000000030000000400000005000000060000000700000008000000090000000a000000");
 
-//     assert_eq!(encoded.to_vec(), expected_encoded);
+    assert_eq!(encoded.to_vec(), expected_encoded);
 
-//     let decoded = WasmABI::<Vec<Vec<u32>>>::decode(&&encoded[..], 0).unwrap();
+    let decoded = WasmABI::<Vec<Vec<u32>>>::decode(&&encoded[..], 0).unwrap();
 
-//     assert_eq!(decoded, original);
-// }
+    assert_eq!(decoded, original);
+}
 
-// #[test]
-// fn test_empty_vector() {
-//     let empty_vec: Vec<u32> = vec![];
+#[test]
+fn test_empty_vector() {
+    let empty_vec: Vec<u32> = vec![];
 
-//     let mut buf = BytesMut::new();
-//     SolidityABI::<Vec<u32>>::encode(&empty_vec, &mut buf, 0).unwrap();
-//     let encoded = buf.freeze();
+    let mut buf = BytesMut::new();
+    SolidityABI::<Vec<u32>>::encode(&empty_vec, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
 
-//     let alloy_value = sol_data::Array::<sol_data::Uint<32>>::abi_encode(&empty_vec);
+    let alloy_value = sol_data::Array::<sol_data::Uint<32>>::abi_encode(&empty_vec);
+    println!("Encoded Vec: {:?}", hex::encode(&encoded));
+    assert_eq!(encoded, alloy_value);
 
-//     assert_eq!(encoded, alloy_value);
+    let decoded = SolidityABI::<Vec<u32>>::decode(&&alloy_value[..], 0).unwrap();
+    assert_eq!(decoded, empty_vec);
+}
+#[test]
+fn test_empty_bytes_solidity() {
+    let original: alloy_primitives::Bytes = alloy_primitives::Bytes::new();
+    let mut buf = BytesMut::new();
 
-//     let decoded = SolidityABI::<Vec<u32>>::decode(&&alloy_value[..], 0).unwrap();
-//     assert_eq!(decoded, empty_vec);
-// }
-// #[test]
-// fn test_empty_bytes_solidity() {
-//     let original: alloy_primitives::Bytes = alloy_primitives::Bytes::new();
-//     let mut buf = BytesMut::new();
+    SolidityABI::<alloy_primitives::Bytes>::encode(&original, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
 
-//     SolidityABI::<alloy_primitives::Bytes>::encode(&original, &mut buf, 0).unwrap();
-//     let encoded = buf.freeze();
+    println!("Encoded Bytes: {:?}", hex::encode(&encoded));
 
-//     println!("Encoded Bytes: {:?}", hex::encode(&encoded));
+    let alloy_encoded = sol_data::Bytes::abi_encode(&original);
 
-//     let alloy_encoded = sol_data::Bytes::abi_encode(&original);
+    assert_eq!(encoded, alloy_encoded);
 
-//     assert_eq!(encoded, alloy_encoded);
+    let decoded = SolidityABI::<alloy_primitives::Bytes>::decode(&&alloy_encoded[..], 0).unwrap();
+    println!("Decoded Bytes: {:?}", decoded.to_vec());
 
-//     let decoded = SolidityABI::<alloy_primitives::Bytes>::decode(&&alloy_encoded[..], 0).unwrap();
-//     println!("Decoded Bytes: {:?}", decoded.to_vec());
+    assert_eq!(original, decoded);
+}
 
-//     assert_eq!(original, decoded);
-// }
+#[test]
+fn test_vec_partial_decoding_solidity() {
+    let original: Vec<u32> = vec![1u32, 2, 3, 4, 5];
+    let mut buf = BytesMut::new();
+    SolidityABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
 
-// #[test]
-// fn test_vec_partial_decoding_solidity() {
-//     let original: Vec<u32> = vec![1u32, 2, 3, 4, 5];
-//     let mut buf = BytesMut::new();
-//     SolidityABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
-//     let encoded = buf.freeze();
+    let alloy_value = sol_data::Array::<sol_data::Uint<32>>::abi_encode(&original);
 
-//     let alloy_value = sol_data::Array::<sol_data::Uint<32>>::abi_encode(&original);
+    println!("Encoded Vec: {:?}", hex::encode(&encoded));
 
-//     println!("Encoded Vec: {:?}", hex::encode(&encoded));
+    assert_eq!(hex::encode(encoded), hex::encode(&alloy_value));
 
-//     assert_eq!(hex::encode(encoded), hex::encode(&alloy_value));
+    // offset, length
+    let decoded_header = SolidityABI::<Vec<u32>>::partial_decode(&&alloy_value[..], 0).unwrap();
 
-//     // offset, length
-//     let decoded_header = SolidityABI::<Vec<u32>>::partial_decode(&&alloy_value[..], 0).unwrap();
+    assert_eq!(decoded_header, (64, 5));
+}
 
-//     assert_eq!(decoded_header, (32, 5));
-// }
+#[test]
+fn test_vec_partial_decoding_wasm() {
+    let original: Vec<u32> = vec![1u32, 2, 3, 4, 5];
+    let mut buf = BytesMut::new();
+    WasmABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
 
-// #[test]
-// fn test_vec_partial_decoding_wasm() {
-//     let original: Vec<u32> = vec![1u32, 2, 3, 4, 5];
-//     let mut buf = BytesMut::new();
-//     WasmABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
-//     let encoded = buf.freeze();
+    println!("Encoded Vec: {:?}", hex::encode(&encoded));
 
-//     println!("Encoded Vec: {:?}", hex::encode(&encoded));
-
-//     // offset, length
-//     let decoded_header = WasmABI::<Vec<u32>>::partial_decode(&&encoded[..], 0).unwrap();
-
-//     assert_eq!(decoded_header, (12, 20));
-
-//     assert_eq!(encoded.chunk()[12..20], vec![1, 0, 0, 0, 2, 0, 0, 0]);
-// }
+    // offset, length
+    let decoded_header = WasmABI::<Vec<u32>>::partial_decode(&&encoded[..], 4).unwrap();
+    assert_eq!(decoded_header, (12, 20));
+    assert_eq!(encoded.chunk()[12..20], vec![1, 0, 0, 0, 2, 0, 0, 0]);
+}
 
 // #[test]
 // fn test_simple_map_wasm_abi() {
