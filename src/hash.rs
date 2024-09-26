@@ -159,7 +159,7 @@ where
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &(impl Buf + ?Sized),
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -227,7 +227,7 @@ where
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &(impl Buf + ?Sized),
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -302,7 +302,7 @@ where
     }
 
     fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &(impl Buf + ?Sized),
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -345,7 +345,7 @@ where
     }
 
     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &(impl Buf + ?Sized),
+        buf: &impl Buf,
         offset: usize,
     ) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);

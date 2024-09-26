@@ -57,11 +57,6 @@ pub trait Encoder<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>: Sized
     }
 }
 
-#[inline]
-pub const fn align_up<const ALIGN: usize>(val: usize) -> usize {
-    (val + ALIGN - 1) & !(ALIGN - 1)
-}
-
 macro_rules! define_encoder_mode {
     ($name:ident, $byte_order:ty, $align:expr, $sol_mode:expr) => {
         pub struct $name<T>(PhantomData<T>);
@@ -145,6 +140,10 @@ impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, S
     }
 }
 
+#[inline]
+pub const fn align_up<const ALIGN: usize>(val: usize) -> usize {
+    (val + ALIGN - 1) & !(ALIGN - 1)
+}
 #[cfg(test)]
 mod tests {
 

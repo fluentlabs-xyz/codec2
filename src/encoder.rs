@@ -10,111 +10,88 @@ use crate::error::CodecError;
 // This could potentially reduce unnecessary memory initialization overhead in cases where
 // the default value is not required before the actual decoding takes place.
 // Consider benchmarking both approaches to measure performance differences.
-
-pub trait Encoder: Sized {
-    /// Header used to save metadata about the encoded value.
+/// Trait for encoding and decoding values with specific byte order, alignment, and mode.
+///
+/// # Type Parameters
+/// - `B`: The byte order used for encoding/decoding.
+/// - `ALIGN`: The alignment requirement for the encoded data.
+/// - `SOL_MODE`: A boolean flag indicating whether Solidity-compatible mode is enabled.
+pub trait Encoder<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>: Sized {
+    /// Returns the header size for this encoder.
     const HEADER_SIZE: usize;
 
-    /// How many bytes we should allocate for the encoded value.
-    /// This is the sum of the header size and the known data size.
-    fn size_hint<const ALIGN: usize>(&self) -> usize {
+    /// Encodes the value into the given buffer at the specified offset.
+    ///
+    /// # Arguments
+    /// * `buf` - The buffer to encode into.
+    /// * `offset` - The starting offset in the buffer for encoding.
+    ///
+    /// # Returns
+    /// `Ok(())` if encoding was successful, or an error if encoding failed.
+    fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError>;
+
+    /// Decodes a value from the given buffer starting at the specified offset.
+    ///
+    /// # Arguments
+    /// * `buf` - The buffer to decode from.
+    /// * `offset` - The starting offset in the buffer for decoding.
+    ///
+    /// # Returns
+    /// The decoded value if successful, or an error if decoding failed.
+    fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError>;
+
+    /// Partially decodes the header to determine the length and offset of the encoded data.
+    ///
+    /// # Arguments
+    /// * `buf` - The buffer to decode from.
+    /// * `offset` - The starting offset in the buffer for decoding.
+    ///
+    /// # Returns
+    /// A tuple `(data_offset, data_length)` if successful, or an error if decoding failed.
+    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError>;
+
+    /// Calculates the number of bytes needed to encode the value.
+    ///
+    /// This includes the header size and any additional space needed for alignment.
+    /// The default implementation aligns the header size to the specified alignment.
+    fn size_hint(&self) -> usize {
         align_up::<ALIGN>(Self::HEADER_SIZE)
     }
-
-    /// Encodes the value into the given buf at the specified offset. The buf must be large enough to hold at least `align(offset) + Self::HEADER_SIZE` bytes.
-    ///
-    /// # Arguments
-    ///
-    /// * `buf` - The buf to encode into.
-    /// * `offset` - The offset in the buf to start encoding at.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if encoding was successful, or an `EncoderError` if there was a problem.
-    fn encode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        &self,
-        buf: &mut BytesMut,
-        offset: usize,
-    ) -> Result<(), CodecError>;
-
-    /// Decodes a value from the given buf starting at the specified offset.
-    ///
-    /// # Arguments
-    ///
-    /// * `buf` - The buf to decode from.
-    /// * `offset` - The offset in the buf to start decoding from.
-    ///
-    /// # Returns
-    ///
-    /// Returns the decoded value if successful, or an `EncoderError` if there was a problem.
-    fn decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &(impl Buf + ?Sized),
-        offset: usize,
-    ) -> Result<Self, CodecError>;
-
-    /// Decodes the header to determine the size of the encoded data and offset to the data.
-    ///
-    /// # Arguments
-    ///
-    /// * `buf` - The buf to decode from.
-    /// * `offset` - The offset in the buf to start decoding from.
-    ///
-    /// # Returns
-    ///
-    /// Returns a tuple of `(offset, data_length)` if successful, or an `EncoderError` if there was a problem.
-    ///
-    /// For primitive types, the header size is 0, so the offset is returned as-is.
-    fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-        buf: &(impl Buf + ?Sized),
-        offset: usize,
-    ) -> Result<(usize, usize), CodecError>;
 }
 
-pub struct EncoderMode<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool> {
-    _byte_order: PhantomData<B>,
+macro_rules! define_encoder_mode {
+    ($name:ident, $byte_order:ty, $align:expr, $sol_mode:expr) => {
+        pub struct $name<T>(PhantomData<T>);
+
+        impl<T> $name<T>
+        where
+            T: Encoder<$byte_order, $align, $sol_mode>,
+        {
+            pub fn encode(value: &T, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+                value.encode(buf, offset)
+            }
+
+            pub fn decode(buf: &impl Buf, offset: usize) -> Result<T, CodecError> {
+                T::decode(buf, offset)
+            }
+
+            pub fn partial_decode(
+                buf: &impl Buf,
+                offset: usize,
+            ) -> Result<(usize, usize), CodecError> {
+                T::partial_decode(buf, offset)
+            }
+
+            pub fn size_hint(value: &T) -> usize {
+                value.size_hint()
+            }
+        }
+    };
 }
 
-pub type SolidityEncoderMode = EncoderMode<BE, 32, true>;
-pub type WasmEncoderMode = EncoderMode<LE, 4, false>;
-
-pub struct EncoderModeAdapter<T, M>(PhantomData<(T, M)>);
-
-impl<T, B, const ALIGN: usize, const SOLIDITY_COMP: bool>
-    EncoderModeAdapter<T, EncoderMode<B, ALIGN, SOLIDITY_COMP>>
-where
-    T: Encoder,
-    B: ByteOrder,
-{
-    pub fn encode(value: &T, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        value.encode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
-    }
-
-    pub fn decode(buf: &(impl Buf + ?Sized), offset: usize) -> Result<T, CodecError> {
-        T::decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
-    }
-
-    pub fn partial_decode(
-        buf: &(impl Buf + ?Sized),
-        offset: usize,
-    ) -> Result<(usize, usize), CodecError> {
-        T::partial_decode::<B, ALIGN, SOLIDITY_COMP>(buf, offset)
-    }
-
-    pub fn size_hint(value: &T) -> usize {
-        value.size_hint::<ALIGN>()
-    }
-}
-
-/// Example usage:
-//
-// use crate::encoder::{SolidityABI, WasmABI};
-// WasmABI::<u32>::encode(&42, &mut buf, 0);
-// let value = WasmABI::<u32>::decode(&buf, 0);
-//
-//
-pub type SolidityABI<T> = EncoderModeAdapter<T, SolidityEncoderMode>;
-pub type WasmABI<T> = EncoderModeAdapter<T, WasmEncoderMode>;
-
+// Define encoder modes for Solidity and Wasm ABI
+define_encoder_mode!(SolidityABI, BE, 32, true);
+define_encoder_mode!(WasmABI, LE, 4, false);
 // TODO: move functions bellow to the utils module
 
 // TODO: d1r1 is it possible to make this fn const?
@@ -147,7 +124,7 @@ pub fn align<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(src: &
     aligned.freeze()
 }
 
-pub fn write_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
+pub fn write_u32_aligned<B: ByteOrder, const ALIGN: usize>(
     buf: &mut BytesMut,
     offset: usize,
     value: u32,
@@ -168,30 +145,88 @@ pub fn write_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: 
     }
 }
 
-pub fn read_u32_aligned<B: ByteOrder, const ALIGN: usize, const SOLIDITY_COMP: bool>(
-    buf: &(impl Buf + ?Sized),
+pub fn read_u32_aligned<B: ByteOrder, const ALIGN: usize>(
+    buf: &impl Buf,
     offset: usize,
 ) -> Result<u32, CodecError> {
     let aligned_value_size = align_up::<ALIGN>(4);
 
-    // TODO: "add overflow check"
+    // Check for overflow
+    let end_offset = offset.checked_add(aligned_value_size).ok_or_else(|| {
+        CodecError::Decoding(crate::error::DecodingError::BufferOverflow {
+            msg: "Overflow occurred when calculating end offset while reading aligned u32"
+                .to_string(),
+        })
+    })?;
+
+    if buf.remaining() < end_offset {
+        return Err(CodecError::Decoding(
+            crate::error::DecodingError::BufferTooSmall {
+                expected: end_offset,
+                found: buf.remaining(),
+                msg: "Buffer underflow occurred while reading aligned u32".to_string(),
+            },
+        ));
+    }
 
     if is_big_endian::<B>() {
-        // For big-endian, copy from the end of the aligned array
-        let start = offset + aligned_value_size - 4;
-        if buf.remaining() < start + 4 {
-            return Err(CodecError::Decoding(
-                crate::error::DecodingError::BufferTooSmall {
-                    expected: start + 4,
-                    found: buf.remaining(),
-                    msg: "failed to aligned read u32".to_string(),
-                },
-            ));
-        }
-
-        Ok(B::read_u32(&buf.chunk()[start..start + 4]))
+        Ok(B::read_u32(&buf.chunk()[end_offset - 4..end_offset]))
     } else {
-        // For little-endian, copy from the start of the aligned array
         Ok(B::read_u32(&buf.chunk()[offset..offset + 4]))
     }
+}
+pub fn read_u32_aligned1<B: ByteOrder, const ALIGN: usize>(
+    buf: &impl Buf,
+    offset: usize,
+) -> Result<u32, CodecError> {
+    let aligned_value_size = align_up::<ALIGN>(4);
+
+    // Check for overflow
+    let end_offset = offset.checked_add(aligned_value_size).ok_or_else(|| {
+        CodecError::Decoding(crate::error::DecodingError::BufferOverflow {
+            msg: "Overflow occurred when calculating end offset while reading aligned u32"
+                .to_string(),
+        })
+    })?;
+
+    if buf.remaining() < end_offset {
+        return Err(CodecError::Decoding(
+            crate::error::DecodingError::BufferTooSmall {
+                expected: end_offset,
+                found: buf.remaining(),
+                msg: "Buffer underflow occurred while reading aligned u32".to_string(),
+            },
+        ));
+    }
+
+    if is_big_endian::<B>() {
+        Ok(B::read_u32(&buf.chunk()[end_offset - 4..end_offset]))
+    } else {
+        Ok(B::read_u32(&buf.chunk()[offset..offset + 4]))
+    }
+}
+
+/// Returns a mutable slice of the buffer at the specified offset, aligned to the specified alignment. This slice is guaranteed to be large enough to hold the value of value_size.
+pub fn get_aligned_slice<B: ByteOrder, const ALIGN: usize>(
+    buf: &mut BytesMut,
+    offset: usize,
+    value_size: usize,
+) -> &mut [u8] {
+    let aligned_offset = align_up::<ALIGN>(offset);
+    let word_size = align_up::<ALIGN>(ALIGN.max(value_size));
+
+    // Ensure the buffer is large enough
+    if buf.len() < aligned_offset + word_size {
+        buf.resize(aligned_offset + word_size, 0);
+    }
+
+    let write_offset = if is_big_endian::<B>() {
+        // For big-endian, return slice at the end of the aligned space
+        aligned_offset + word_size - value_size
+    } else {
+        // For little-endian, return slice at the beginning of the aligned space
+        aligned_offset
+    };
+
+    &mut buf[write_offset..write_offset + value_size]
 }

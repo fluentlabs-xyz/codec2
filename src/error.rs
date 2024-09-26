@@ -35,6 +35,9 @@ pub enum DecodingError {
         msg: String,
     },
 
+    #[error("Buffer overflow: {msg}")]
+    BufferOverflow { msg: String },
+
     #[error("Unexpected end of buf")]
     UnexpectedEof,
 
