@@ -320,6 +320,10 @@ fn test_nested_map_sol_abi() {
 
     let encoded = buf.freeze();
     println!("Encoded Map: {:?}", hex::encode(&encoded));
+
+    let decoded = SolidityABI::<HashMap<u32, HashMap<u32, u32>>>::decode(&&encoded[..], 0).unwrap();
+
+    assert_eq!(decoded, original);
 }
 
 #[test]

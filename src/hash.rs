@@ -1,11 +1,11 @@
 extern crate alloc;
 use alloc::vec::Vec;
+use byteorder::ByteOrder;
+use core::fmt::Debug;
 use core::hash::Hash;
 
-use byteorder::ByteOrder;
-
 use crate::{
-    bytes::{read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_wasm},
+    bytes::{read_bytes, read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_wasm},
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
 };
 use alloy_primitives::hex;
@@ -220,7 +220,7 @@ where
 }
 impl<K, V, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for HashMap<K, V>
 where
-    K: Default + Sized + Encoder<B, { ALIGN }, true> + Eq + Hash + Ord,
+    K: Debug + Default + Sized + Encoder<B, { ALIGN }, true> + Eq + Hash + Ord,
     V: Default + Sized + Encoder<B, { ALIGN }, true>,
 {
     const HEADER_SIZE: usize = 32 + 32 + 32 + 32; // offset + length + keys_header + values_header
@@ -281,6 +281,7 @@ where
         Ok(())
     }
 
+    // current solidity decode nested map
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
         let aligned_offset = align_up::<{ ALIGN }>(offset);
         let aligned_header_el_size = align_up::<ALIGN>(4);
@@ -294,37 +295,49 @@ where
             }));
         }
 
-        let length = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
+        let (data_offset, data_length) =
+            read_bytes_header::<B, { ALIGN }, true>(buf, aligned_offset).unwrap();
+        println!("data_offset: {}, data_length: {}", data_offset, data_length);
 
-        let (keys_offset, keys_length) =
-            read_bytes_header::<B, { ALIGN }, false>(buf, aligned_offset + aligned_header_el_size)
-                .unwrap();
+        let keys_offset =
+            read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset + data_offset)? as usize;
+        let values_offset =
+            read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset + data_offset + 32)? as usize;
 
-        let (values_offset, values_length) = read_bytes_header::<B, { ALIGN }, false>(
-            buf,
-            aligned_offset + aligned_header_el_size * 3,
-        )
-        .unwrap();
+        println!(
+            "keys_offset: {}, values_offset: {}",
+            keys_offset, values_offset
+        );
 
-        let key_bytes = &buf.chunk()[keys_offset..keys_offset + keys_length];
-        let value_bytes = &buf.chunk()[values_offset..values_offset + values_length];
+        let key_bytes = &buf.chunk()[aligned_offset + data_offset + keys_offset + 32..]; // 32 is the offset of the keys length
 
-        let keys = (0..length).map(|i| {
+        // let key_bytes =
+        //     read_bytes::<B, ALIGN, true>(buf, aligned_offset + data_offset + keys_offset)?;
+        println!(">>>key_bytes: {:?}", hex::encode(&key_bytes));
+
+        let keys = (0..data_length).map(|i| {
             let key_offset = align_up::<{ ALIGN }>(K::HEADER_SIZE) * i;
-            K::decode(&key_bytes, key_offset).unwrap_or_default()
+            println!("key_offset: {}", key_offset);
+            println!("key header_size: {}", K::HEADER_SIZE);
+            let decoded = K::decode(&key_bytes, key_offset).unwrap_or_default();
+            println!("decoded: {:?}", &decoded);
+            decoded
         });
 
-        let values = (0..length).map(|i| {
+        let value_bytes = &buf.chunk()[values_offset + 32..]; // 32 is the offset of the values length
+        println!("value_bytes: {:?}", hex::encode(&value_bytes));
+
+        let values = (0..data_length).map(|i| {
             let value_offset = align_up::<{ ALIGN }>(V::HEADER_SIZE) * i;
             V::decode(&value_bytes, value_offset).unwrap_or_default()
         });
 
         let result: HashMap<K, V> = keys.zip(values).collect();
 
-        if result.len() != length {
+        if result.len() != data_length {
             return Err(CodecError::Decoding(DecodingError::InvalidData(format!(
                 "Expected {} elements, but decoded {}",
-                length,
+                data_length,
                 result.len()
             ))));
         }
