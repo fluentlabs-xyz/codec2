@@ -304,8 +304,6 @@ mod tests {
         <Vec<u32> as Encoder<BigEndian, 32, true>>::encode(&original, &mut buf, 0).unwrap();
         let encoded = buf.freeze();
 
-        // Add assertion for expected Solidity encoding if needed
-
         let decoded = <Vec<u32> as Encoder<BigEndian, 32, true>>::decode(&encoded, 0).unwrap();
 
         assert_eq!(original, decoded);

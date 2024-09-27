@@ -283,28 +283,48 @@ fn test_vec_partial_decoding_wasm() {
     assert_eq!(encoded.chunk()[12..20], vec![1, 0, 0, 0, 2, 0, 0, 0]);
 }
 
-// #[test]
-// fn test_simple_map_wasm_abi() {
-//     let mut original = HashMap::new();
-//     original.insert(100, 20);
-//     original.insert(3, 5);
-//     original.insert(1000, 60);
+#[test]
+fn test_simple_map_wasm_abi() {
+    let mut original = HashMap::new();
+    original.insert(100, 20);
+    original.insert(3, 5);
+    original.insert(1000, 60);
 
-//     let mut buf = BytesMut::new();
+    let mut buf = BytesMut::new();
+    WasmABI::encode(&original, &mut buf, 0).unwrap();
 
-//     WasmABI::<HashMap<u32, u32>>::encode(&original, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
 
-//     let encoded = buf.freeze();
+    let expected_encoded = hex!(
+        "03000000140000000c000000200000000c0000000300000064000000e803000005000000140000003c000000"
+    );
 
-//     let expected_encoded = hex!(
-//         "03000000140000000c000000200000000c0000000300000064000000e803000005000000140000003c000000"
-//     );
+    assert_eq!(encoded.to_vec(), expected_encoded);
 
-//     assert_eq!(encoded.to_vec(), expected_encoded);
+    println!("Encoded Map: {:?}", hex::encode(&encoded));
 
-//     println!("Encoded Map: {:?}", hex::encode(&encoded));
+    let decoded = WasmABI::<HashMap<u32, u32>>::decode(&&encoded[..], 0).unwrap();
 
-//     // let decoded = WasmABI::<HashMap<u32, u32>>::decode(&&encoded[..], 0).unwrap();
+    assert_eq!(decoded, original);
+}
 
-//     // assert_eq!(decoded, original);
-// }
+#[test]
+fn test_nested_map_wasm_abi() {
+    let mut original = HashMap::new();
+    original.insert(100, HashMap::from([(1, 2), (3, 4)]));
+    original.insert(3, HashMap::new());
+    original.insert(1000, HashMap::from([(7, 8), (9, 4)]));
+
+    let mut buf = BytesMut::new();
+    WasmABI::encode(&original, &mut buf, 0).unwrap();
+
+    let encoded = buf.freeze();
+    let expected_encoded =
+    "03000000140000000c000000200000005c0000000300000064000000e8030000000000003c000000000000003c00000000000000020000003c000000080000004400000008000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
+
+    assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
+
+    let decoded = WasmABI::<HashMap<u32, HashMap<u32, u32>>>::decode(&&encoded[..], 0).unwrap();
+
+    assert_eq!(decoded, original);
+}
