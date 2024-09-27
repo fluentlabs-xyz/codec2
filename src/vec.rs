@@ -109,6 +109,7 @@ where
         read_bytes_header::<B, ALIGN, false>(buf, offset)
     }
 }
+
 // Implementation forSolidity mode
 impl<T, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Vec<T>
 where

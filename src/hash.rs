@@ -4,13 +4,13 @@ use core::hash::Hash;
 
 use byteorder::ByteOrder;
 
-use bytes::{Buf, BytesMut};
-use hashbrown::{HashMap, HashSet};
-
 use crate::{
-    bytes::{read_bytes_header, write_bytes},
+    bytes::{read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_wasm},
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
 };
+use alloy_primitives::hex;
+use bytes::{Buf, BytesMut};
+use hashbrown::{HashMap, HashSet};
 
 use crate::error::{CodecError, DecodingError};
 
@@ -135,12 +135,7 @@ where
             value.encode(&mut value_buf, value_offset)?;
         }
 
-        write_bytes::<B, ALIGN, false>(
-            buf,
-            aligned_offset + aligned_header_el_size * 3,
-            &value_buf,
-            entries.len() as u32,
-        );
+        write_bytes_wasm::<B, ALIGN>(buf, aligned_offset + aligned_header_el_size * 3, &value_buf);
 
         Ok(())
     }
@@ -174,6 +169,142 @@ where
             "values_offset: {}, values_length: {}",
             values_offset, values_length
         );
+
+        let key_bytes = &buf.chunk()[keys_offset..keys_offset + keys_length];
+        let value_bytes = &buf.chunk()[values_offset..values_offset + values_length];
+
+        let keys = (0..length).map(|i| {
+            let key_offset = align_up::<{ ALIGN }>(K::HEADER_SIZE) * i;
+            K::decode(&key_bytes, key_offset).unwrap_or_default()
+        });
+
+        let values = (0..length).map(|i| {
+            let value_offset = align_up::<{ ALIGN }>(V::HEADER_SIZE) * i;
+            V::decode(&value_bytes, value_offset).unwrap_or_default()
+        });
+
+        let result: HashMap<K, V> = keys.zip(values).collect();
+
+        if result.len() != length {
+            return Err(CodecError::Decoding(DecodingError::InvalidData(format!(
+                "Expected {} elements, but decoded {}",
+                length,
+                result.len()
+            ))));
+        }
+
+        Ok(result)
+    }
+
+    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+
+        if buf.remaining() < aligned_offset + aligned_header_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + aligned_header_size,
+                found: buf.remaining(),
+                msg: "Not enough data to decode HashMap header".to_string(),
+            }));
+        }
+
+        let (keys_offset, keys_length) =
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))
+                .unwrap();
+        let (_values_offset, values_length) =
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(12))
+                .unwrap();
+
+        Ok((keys_offset, keys_length + values_length))
+    }
+}
+impl<K, V, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for HashMap<K, V>
+where
+    K: Default + Sized + Encoder<B, { ALIGN }, true> + Eq + Hash + Ord,
+    V: Default + Sized + Encoder<B, { ALIGN }, true>,
+{
+    const HEADER_SIZE: usize = 32 + 32 + 32 + 32; // offset + length + keys_header + values_header
+
+    fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+
+        // Ensure buf is large enough for the header
+        if buf.len() < aligned_offset + 32 {
+            buf.resize(aligned_offset + 32, 0);
+        }
+
+        println!("buf before: {:?}", hex::encode(&buf));
+        // Write offset size
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
+
+        // Make sure keys & values are sorted
+        let mut entries: Vec<_> = self.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+
+        // Write map size
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 32, self.len() as u32);
+
+        // Encode and write keys
+        let mut key_buf = BytesMut::zeroed(align_up::<ALIGN>(K::HEADER_SIZE) * self.len());
+
+        for (i, (key, _)) in entries.iter().enumerate() {
+            let key_offset = align_up::<ALIGN>(K::HEADER_SIZE) * i;
+            key.encode(&mut key_buf, key_offset)?;
+        }
+
+        // Write keys offset
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 64, buf.len() as u32);
+
+        println!("key_buf: {:?}", hex::encode(&key_buf));
+        // write keys header and keys data
+        write_bytes_solidity::<B, ALIGN>(buf, aligned_offset + 128, &key_buf, entries.len() as u32);
+
+        println!("buf after keys: {:?}", hex::encode(&buf));
+
+        // Encode and write values
+        let mut value_buf = BytesMut::zeroed(align_up::<ALIGN>(V::HEADER_SIZE) * self.len());
+        for (i, (_, value)) in entries.iter().enumerate() {
+            let value_offset = align_up::<ALIGN>(V::HEADER_SIZE) * i;
+            value.encode(&mut value_buf, value_offset)?;
+        }
+
+        // Write keys offset
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 96, buf.len() as u32);
+
+        write_bytes_solidity::<B, ALIGN>(
+            buf,
+            aligned_offset + 128,
+            &value_buf,
+            entries.len() as u32,
+        );
+
+        Ok(())
+    }
+
+    fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+        let aligned_offset = align_up::<{ ALIGN }>(offset);
+        let aligned_header_el_size = align_up::<ALIGN>(4);
+        let aligned_header_size = align_up::<{ ALIGN }>(Self::HEADER_SIZE);
+
+        if buf.remaining() < aligned_offset + aligned_header_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + aligned_header_size,
+                found: buf.remaining(),
+                msg: "Not enough data to decode HashMap header".to_string(),
+            }));
+        }
+
+        let length = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
+
+        let (keys_offset, keys_length) =
+            read_bytes_header::<B, { ALIGN }, false>(buf, aligned_offset + aligned_header_el_size)
+                .unwrap();
+
+        let (values_offset, values_length) = read_bytes_header::<B, { ALIGN }, false>(
+            buf,
+            aligned_offset + aligned_header_el_size * 3,
+        )
+        .unwrap();
 
         let key_bytes = &buf.chunk()[keys_offset..keys_offset + keys_length];
         let value_bytes = &buf.chunk()[values_offset..values_offset + values_length];
