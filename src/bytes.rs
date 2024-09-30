@@ -1,13 +1,12 @@
 extern crate alloc;
 
-use byteorder::ByteOrder;
-use bytes::{Buf, Bytes, BytesMut};
-use core::mem;
-
 use crate::{
     encoder::{align_up, read_u32_aligned, write_u32_aligned},
     error::{CodecError, DecodingError},
 };
+use byteorder::ByteOrder;
+use bytes::{Buf, Bytes, BytesMut};
+use core::mem;
 
 /// Write bytes in Solidity compatible format
 pub fn write_bytes_solidity<B: ByteOrder, const ALIGN: usize>(
@@ -172,10 +171,9 @@ pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
 #[cfg(test)]
 mod tests {
 
-    use crate::encoder::{SolidityABI, WasmABI};
-
     use super::*;
-    use byteorder::{BigEndian, BE, LE};
+    use crate::encoder::{SolidityABI, WasmABI};
+    use byteorder::{BigEndian, LE};
 
     #[test]
     fn test_write_bytes_sol() {

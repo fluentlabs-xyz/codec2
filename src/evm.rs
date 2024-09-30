@@ -1,13 +1,19 @@
-use std::usize;
-
-use crate::bytes::{read_bytes, read_bytes_header, read_bytes_header_solidity, write_bytes};
-use crate::encoder::{
-    align_up, get_aligned_slice, is_big_endian, read_u32_aligned, write_u32_aligned, Encoder,
+use crate::{
+    bytes::{read_bytes, read_bytes_header_solidity, write_bytes},
+    encoder::{
+        align_up,
+        get_aligned_slice,
+        is_big_endian,
+        read_u32_aligned,
+        write_u32_aligned,
+        Encoder,
+    },
+    error::{CodecError, DecodingError},
 };
-use crate::error::{CodecError, DecodingError};
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
+use std::usize;
 
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
@@ -116,7 +122,7 @@ impl<const N: usize, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, fal
         Ok(FixedBytes::from_slice(&data))
     }
 
-    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+    fn partial_decode(_buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         Ok((aligned_offset, N))
     }
@@ -150,7 +156,7 @@ impl<const N: usize, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, tru
         Ok(FixedBytes::from_slice(&data))
     }
 
-    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+    fn partial_decode(_buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
         let aligned_offset = align_up::<32>(offset); // Always 32-byte aligned for Solidity
         Ok((aligned_offset, 32))
     }
@@ -321,7 +327,7 @@ impl<
         Ok(value)
     }
 
-    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+    fn partial_decode(_buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
         let aligned_offset = if SOL_MODE {
             align_up::<32>(offset)
         } else {
@@ -338,14 +344,12 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
 
+    use super::*;
     #[cfg(test)]
     use alloy_primitives::{Address, U256};
     use byteorder::{BigEndian, LittleEndian};
     use bytes::BytesMut;
-
-    use super::*;
 
     #[test]
     fn test_write_to_existing_buf() {
@@ -362,7 +366,7 @@ mod tests {
         let original = Bytes::from_static(b"Hello, World");
         // Write the data to the buf
         let _result =
-            write_bytes::<BigEndian, 8, false>(&mut buf, 16, &original, (original.len() as u32));
+            write_bytes::<BigEndian, 8, false>(&mut buf, 16, &original, original.len() as u32);
 
         let expected = [
             0, 0, 0, 0, 0, 0, 0, 32, // offset of the 1st bytes

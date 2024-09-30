@@ -1,6 +1,7 @@
-use crate::encoder::Encoder;
-use crate::encoder::{align_up, read_u32_aligned, write_u32_aligned};
-use crate::error::{CodecError, DecodingError};
+use crate::{
+    encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
+    error::{CodecError, DecodingError},
+};
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
 

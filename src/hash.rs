@@ -1,22 +1,14 @@
 extern crate alloc;
+use crate::{
+    bytes::{read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_wasm},
+    encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
+    error::{CodecError, DecodingError},
+};
 use alloc::vec::Vec;
 use byteorder::ByteOrder;
-use core::cmp::max;
-use core::fmt::Debug;
-use core::hash::Hash;
-
-use crate::{
-    bytes::{
-        read_bytes, read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_solidity2,
-        write_bytes_wasm,
-    },
-    encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
-};
-use alloy_primitives::hex;
 use bytes::{Buf, BytesMut};
+use core::{fmt::Debug, hash::Hash};
 use hashbrown::{HashMap, HashSet};
-
-use crate::error::{CodecError, DecodingError};
 
 /// Implement encoding for HashMap, SOL_MODE = false
 impl<K, V, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for HashMap<K, V>
@@ -537,18 +529,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
-
-    use byteorder::{LittleEndian, BE};
-    use bytes::BytesMut;
-    use hashbrown::HashMap;
-
+    use super::*;
     use crate::{
         encoder::{SolidityABI, WasmABI},
         tests::print_bytes,
     };
-
-    use super::*;
+    use alloc::vec::Vec;
+    use byteorder::BE;
+    use bytes::BytesMut;
+    use hashbrown::HashMap;
 
     #[test]
     fn test_nested_map() {
@@ -608,7 +597,8 @@ mod tests {
         WasmABI::encode(&values, &mut buf, 0).unwrap();
         let encoded = buf.freeze();
 
-        // Note: The expected encoded string might need to be updated based on the new encoding format
+        // Note: The expected encoded string might need to be updated based on the new encoding
+        // format
         let expected_encoded = "0300000014000000480000005c0000004800000003000000240000000c00000003000000300000000c000000030000003c0000000c00000000000000010000000200000000000000010000000600000003000000010000000200000003000000240000000c00000003000000300000000c000000030000003c0000000c000000030000000400000005000000030000000400000005000000030000000400000005000000";
         assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
 

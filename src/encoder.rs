@@ -1,12 +1,10 @@
-use std::{f32::consts::E, marker::PhantomData};
-
+use crate::error::CodecError;
 use byteorder::{ByteOrder, BE, LE};
 use bytes::{Buf, Bytes, BytesMut};
+use std::marker::PhantomData;
 
-use crate::error::CodecError;
-
-// TODO: @d1r1 Investigate whether decoding the result into an uninitialized memory (e.g., using `MaybeUninit`)
-// would be more efficient than initializing with `Default`.
+// TODO: @d1r1 Investigate whether decoding the result into an uninitialized memory (e.g., using
+// `MaybeUninit`) would be more efficient than initializing with `Default`.
 // This could potentially reduce unnecessary memory initialization overhead in cases where
 // the default value is not required before the actual decoding takes place.
 // Consider benchmarking both approaches to measure performance differences.
@@ -206,7 +204,8 @@ pub fn read_u32_aligned1<B: ByteOrder, const ALIGN: usize>(
     }
 }
 
-/// Returns a mutable slice of the buffer at the specified offset, aligned to the specified alignment. This slice is guaranteed to be large enough to hold the value of value_size.
+/// Returns a mutable slice of the buffer at the specified offset, aligned to the specified
+/// alignment. This slice is guaranteed to be large enough to hold the value of value_size.
 pub fn get_aligned_slice<B: ByteOrder, const ALIGN: usize>(
     buf: &mut BytesMut,
     offset: usize,

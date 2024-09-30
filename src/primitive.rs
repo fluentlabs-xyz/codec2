@@ -1,10 +1,11 @@
 extern crate alloc;
 
+use crate::{
+    encoder::{align_up, get_aligned_slice, is_big_endian, Encoder},
+    error::{CodecError, DecodingError},
+};
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
-
-use crate::encoder::{align_up, get_aligned_slice, is_big_endian, Encoder};
-use crate::error::{CodecError, DecodingError};
 
 impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, SOL_MODE> for u8 {
     const HEADER_SIZE: usize = core::mem::size_of::<u8>();
@@ -147,7 +148,8 @@ impl_int!(i32, read_i32, write_i32);
 impl_int!(i64, read_i64, write_i64);
 
 /// Encodes and decodes Option<T> where T is an Encoder.
-/// The encoded data is prefixed with a single byte that indicates whether the Option is Some or None. Single byte will be aligned to ALIGN.
+/// The encoded data is prefixed with a single byte that indicates whether the Option is Some or
+/// None. Single byte will be aligned to ALIGN.
 impl<T, B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, { ALIGN }, { SOL_MODE }>
     for Option<T>
 where
@@ -304,10 +306,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use byteorder::{BigEndian, LittleEndian};
     use bytes::{Bytes, BytesMut};
-
-    use super::*;
 
     #[test]
     fn test_u8_be_encode_decode() {
@@ -327,7 +328,7 @@ mod tests {
 
         assert_eq!(hex::encode(&buf), expected_encoded);
 
-        let mut buf_for_decode = buf.clone().freeze();
+        let buf_for_decode = buf.clone().freeze();
         let decoded =
             <u8 as Encoder<BigEndian, { ALIGNMENT }, false>>::decode(&buf_for_decode, 0).unwrap();
 
@@ -546,7 +547,7 @@ mod tests {
         let ok = <Option<u32> as Encoder<LittleEndian, 4, false>>::encode(&original, &mut buf, 0);
         assert!(ok.is_ok());
 
-        let mut encoded = buf.freeze();
+        let encoded = buf.freeze();
         println!("Encoded: {:?}", &encoded.to_vec());
         assert_eq!(
             encoded,
@@ -565,7 +566,7 @@ mod tests {
 
         <[u8; 5] as Encoder<LittleEndian, 4, false>>::encode(&original, &mut buf, 0).unwrap();
 
-        let mut encoded = buf.freeze();
+        let encoded = buf.freeze();
         println!("Encoded: {:?}", hex::encode(&encoded));
 
         // Check that the encoded data is correct and properly aligned

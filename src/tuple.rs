@@ -1,8 +1,9 @@
+use crate::{
+    encoder::{align_up, Encoder},
+    error::CodecError,
+};
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
-
-use crate::encoder::{align_up, get_aligned_slice, Encoder};
-use crate::error::CodecError;
 
 impl<T, B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, { ALIGN }, { SOL_MODE }>
     for (T,)
@@ -75,10 +76,9 @@ impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6);
 impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7, T8; 0, 1, 2, 3, 4, 5, 6, 7);
 #[cfg(test)]
 mod tests {
+    use super::*;
     use byteorder::LittleEndian;
     use bytes::BytesMut;
-
-    use super::*;
 
     #[test]
     fn test_single_element_tuple() {

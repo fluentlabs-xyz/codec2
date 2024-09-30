@@ -1,16 +1,12 @@
 extern crate alloc;
+use crate::{
+    bytes::{read_bytes_header, read_bytes_wasm, write_bytes_solidity, write_bytes_wasm},
+    encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
+    error::{CodecError, DecodingError},
+};
 use alloc::vec::Vec;
-
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
-
-use crate::bytes::{read_bytes, read_bytes_wasm};
-use crate::encoder::read_u32_aligned1;
-use crate::error::{CodecError, DecodingError};
-use crate::{
-    bytes::{read_bytes_header, write_bytes_solidity, write_bytes_wasm},
-    encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
-};
 
 /// We encode dynamic arrays as following:
 /// - header
