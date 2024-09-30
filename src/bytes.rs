@@ -34,6 +34,24 @@ pub fn write_bytes_solidity<B: ByteOrder, const ALIGN: usize>(
     buf.len() - data_offset
 }
 
+// write bytes to the end of buffer
+// old_buf_data...elements...data
+pub fn write_bytes_solidity2<B: ByteOrder, const ALIGN: usize>(
+    buf: &mut BytesMut,
+    data: &[u8],
+    elements: u32, // Number of elements
+) -> usize {
+    let data_offset = buf.len();
+    // Write length of the data (number of elements)
+    write_u32_aligned::<B, ALIGN>(buf, data_offset, elements as u32);
+
+    // Append the actual data
+    buf.extend_from_slice(data);
+
+    // Return the number of bytes written (including alignment)
+    buf.len() - data_offset
+}
+
 /// Write bytes in WASM compatible format
 pub fn write_bytes_wasm<B: ByteOrder, const ALIGN: usize>(
     buf: &mut BytesMut,

@@ -1,11 +1,15 @@
 extern crate alloc;
 use alloc::vec::Vec;
 use byteorder::ByteOrder;
+use core::cmp::max;
 use core::fmt::Debug;
 use core::hash::Hash;
 
 use crate::{
-    bytes::{read_bytes, read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_wasm},
+    bytes::{
+        read_bytes, read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_solidity2,
+        write_bytes_wasm,
+    },
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
 };
 use alloy_primitives::hex;
@@ -14,80 +18,7 @@ use hashbrown::{HashMap, HashSet};
 
 use crate::error::{CodecError, DecodingError};
 
-/// Example of encoding a nested HashMap:
-///
-/// ```rust
-/// use hashbrown::HashMap;
-///
-/// let mut values = HashMap::new();
-/// values.insert(100, HashMap::from([(1, 2), (3, 4)]));
-/// values.insert(3, HashMap::new());
-/// values.insert(1000, HashMap::from([(7, 8), (9, 4)]));
-/// ```
-///
-/// Encoded data (in hexadecimal):
-/// ```text
-/// 03000000140000000c000000200000005c000000 // Header of outer HashMap
-/// 0300000064000000e8030000                 // Keys of outer HashMap
-/// 00000000 3c000000 00000000 3c000000 00000000 // Empty inner HashMap (key 3)
-/// 02000000 3c000000 08000000 44000000 08000000 // Header of inner HashMap (key 100)
-/// 01000000 03000000 02000000 04000000         // Data of inner HashMap (key 100)
-/// 02000000 4c000000 08000000 54000000 08000000 // Header of inner HashMap (key 1000)
-/// 07000000 09000000 08000000 04000000         // Data of inner HashMap (key 1000)
-/// ```
-///
-/// Detailed explanation:
-/// ```text
-/// // Outer HashMap header
-/// 03000000 - Number of elements in outer HashMap (3)
-/// 14000000 - Offset to keys of outer HashMap (20 bytes)
-/// 0c000000 - Length of keys data in outer HashMap (12 bytes)
-/// 20000000 - Offset to values of outer HashMap (32 bytes)
-/// 5c000000 - Length of values data in outer HashMap (92 bytes)
-///
-/// // Outer HashMap keys (sorted)
-/// 03000000 - Key 1 (3)
-/// 64000000 - Key 2 (100)
-/// e8030000 - Key 3 (1000)
-///
-/// // Outer HashMap values (inner HashMaps)
-///
-/// // Value for key 3 (empty HashMap)
-/// 00000000 - Number of elements (0)
-/// 3c000000 - Offset to keys (unused)
-/// 00000000 - Length of keys data (0)
-/// 3c000000 - Offset to values (unused)
-/// 00000000 - Length of values data (0)
-///
-/// // Value for key 100 (HashMap with 2 elements)
-/// 02000000 - Number of elements (2)
-/// 3c000000 - Offset to keys (60 bytes from start of this inner HashMap)
-/// 08000000 - Length of keys data (8 bytes)
-/// 44000000 - Offset to values (68 bytes from start of this inner HashMap)
-/// 08000000 - Length of values data (8 bytes)
-/// 01000000 - Inner key 1 (1)
-/// 03000000 - Inner key 2 (3)
-/// 02000000 - Value for inner key 1 (2)
-/// 04000000 - Value for inner key 2 (4)
-///
-/// // Value for key 1000 (HashMap with 2 elements)
-/// 02000000 - Number of elements (2)
-/// 4c000000 - Offset to keys (76 bytes from start of this inner HashMap)
-/// 08000000 - Length of keys data (8 bytes)
-/// 54000000 - Offset to values (84 bytes from start of this inner HashMap)
-/// 08000000 - Length of values data (8 bytes)
-/// 07000000 - Inner key 1 (7)
-/// 09000000 - Inner key 2 (9)
-/// 08000000 - Value for inner key 1 (8)
-/// 04000000 - Value for inner key 2 (4)
-/// ```
-///
-/// Notes:
-/// - All integers are stored in little-endian format.
-/// - Keys in both outer and inner HashMaps are sorted.
-/// - Empty HashMaps (like the one for key 3) still have a full header, but with zero lengths.
-/// - Offsets in inner HashMaps are relative to the start of that inner HashMap's data.
-///
+/// Implement encoding for HashMap, SOL_MODE = false
 impl<K, V, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for HashMap<K, V>
 where
     K: Default + Sized + Encoder<B, { ALIGN }, false> + Eq + Hash + Ord,
@@ -218,10 +149,11 @@ where
         Ok((keys_offset, keys_length + values_length))
     }
 }
+/// Implement encoding for HashMap, SOL_MODE = true
 impl<K, V, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for HashMap<K, V>
 where
     K: Debug + Default + Sized + Encoder<B, { ALIGN }, true> + Eq + Hash + Ord,
-    V: Default + Sized + Encoder<B, { ALIGN }, true>,
+    V: Debug + Default + Sized + Encoder<B, { ALIGN }, true>,
 {
     const HEADER_SIZE: usize = 32 + 32 + 32 + 32; // offset + length + keys_header + values_header
 
@@ -229,20 +161,19 @@ where
         let aligned_offset = align_up::<ALIGN>(offset);
 
         // Ensure buf is large enough for the header
-        if buf.len() < aligned_offset + 32 {
-            buf.resize(aligned_offset + 32, 0);
+        if buf.len() < aligned_offset + Self::HEADER_SIZE {
+            buf.resize(aligned_offset + Self::HEADER_SIZE, 0);
         }
 
-        println!("buf before: {:?}", hex::encode(&buf));
         // Write offset size
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, (32) as u32);
+
+        // Write map size
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 32, self.len() as u32);
 
         // Make sure keys & values are sorted
         let mut entries: Vec<_> = self.iter().collect();
         entries.sort_by(|a, b| a.0.cmp(b.0));
-
-        // Write map size
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 32, self.len() as u32);
 
         // Encode and write keys
         let mut key_buf = BytesMut::zeroed(align_up::<ALIGN>(K::HEADER_SIZE) * self.len());
@@ -251,95 +182,100 @@ where
             let key_offset = align_up::<ALIGN>(K::HEADER_SIZE) * i;
             key.encode(&mut key_buf, key_offset)?;
         }
-
+        let relative_key_offset = buf.len() - aligned_offset - 64;
         // Write keys offset
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 64, buf.len() as u32);
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 64, relative_key_offset as u32);
 
-        println!("key_buf: {:?}", hex::encode(&key_buf));
-        // write keys header and keys data
-        write_bytes_solidity::<B, ALIGN>(buf, aligned_offset + 128, &key_buf, entries.len() as u32);
+        // write keys header and keys data to tbuf
+        write_bytes_solidity::<B, ALIGN>(buf, aligned_offset + 64, &key_buf, entries.len() as u32);
 
-        println!("buf after keys: {:?}", hex::encode(&buf));
+        // Write values offset
+        let relative_value_offset = buf.len() - aligned_offset - 96;
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 96, relative_value_offset as u32);
 
         // Encode and write values
         let mut value_buf = BytesMut::zeroed(align_up::<ALIGN>(V::HEADER_SIZE) * self.len());
         for (i, (_, value)) in entries.iter().enumerate() {
             let value_offset = align_up::<ALIGN>(V::HEADER_SIZE) * i;
             value.encode(&mut value_buf, value_offset)?;
+            // println!("value_buf: {:?}", hex::encode(&value_buf));
         }
 
-        // Write keys offset
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 96, buf.len() as u32);
-
-        write_bytes_solidity::<B, ALIGN>(
-            buf,
-            aligned_offset + 128,
-            &value_buf,
-            entries.len() as u32,
-        );
+        write_bytes_solidity::<B, ALIGN>(buf, buf.len(), &value_buf, entries.len() as u32);
 
         Ok(())
     }
 
     // current solidity decode nested map
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<{ ALIGN }>(offset);
-        let aligned_header_el_size = align_up::<ALIGN>(4);
-        let aligned_header_size = align_up::<{ ALIGN }>(Self::HEADER_SIZE);
+        const KEYS_OFFSET: usize = 32;
+        const VALUES_OFFSET: usize = 64;
 
-        if buf.remaining() < aligned_offset + aligned_header_size {
+        let aligned_offset = align_up::<{ ALIGN }>(offset);
+
+        // Check if there's enough data to read the header
+        let header_end = aligned_offset
+            .checked_add(Self::HEADER_SIZE)
+            .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
+
+        if buf.remaining()
+            < usize::try_from(header_end)
+                .map_err(|_| CodecError::Decoding(DecodingError::Overflow))?
+        {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_header_size,
+                expected: header_end as usize,
                 found: buf.remaining(),
                 msg: "Not enough data to decode HashMap header".to_string(),
             }));
         }
 
-        let (data_offset, data_length) =
-            read_bytes_header::<B, { ALIGN }, true>(buf, aligned_offset).unwrap();
-        println!("data_offset: {}, data_length: {}", data_offset, data_length);
+        // Read data offset
+        let data_offset = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
 
+        // Calculate start offset
+        let start_offset = aligned_offset
+            .checked_add(data_offset)
+            .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
+
+        // Read length
+        let length = read_u32_aligned::<B, { ALIGN }>(buf, start_offset)? as usize;
+        if length == 0 {
+            return Ok(HashMap::new());
+        }
+
+        // Read relative keys and values offsets (relative to the current offset)
         let keys_offset =
-            read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset + data_offset)? as usize;
+            read_u32_aligned::<B, { ALIGN }>(buf, start_offset + KEYS_OFFSET)? as usize;
         let values_offset =
-            read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset + data_offset + 32)? as usize;
+            read_u32_aligned::<B, { ALIGN }>(buf, start_offset + VALUES_OFFSET)? as usize;
 
-        println!(
-            "keys_offset: {}, values_offset: {}",
-            keys_offset, values_offset
-        );
+        // Calculate absolute offsets
+        let keys_start = keys_offset
+            .checked_add(start_offset)
+            .and_then(|sum| sum.checked_add(KEYS_OFFSET))
+            .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
+        let values_start = values_offset
+            .checked_add(start_offset)
+            .and_then(|sum| sum.checked_add(VALUES_OFFSET))
+            .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
-        let key_bytes = &buf.chunk()[aligned_offset + data_offset + keys_offset + 32..]; // 32 is the offset of the keys length
+        let mut result = HashMap::with_capacity(length);
 
-        // let key_bytes =
-        //     read_bytes::<B, ALIGN, true>(buf, aligned_offset + data_offset + keys_offset)?;
-        println!(">>>key_bytes: {:?}", hex::encode(&key_bytes));
+        let keys_data = &buf.chunk()[keys_start + 32..];
+        let values_data = &buf.chunk()[values_start + 32..];
 
-        let keys = (0..data_length).map(|i| {
-            let key_offset = align_up::<{ ALIGN }>(K::HEADER_SIZE) * i;
-            println!("key_offset: {}", key_offset);
-            println!("key header_size: {}", K::HEADER_SIZE);
-            let decoded = K::decode(&key_bytes, key_offset).unwrap_or_default();
-            println!("decoded: {:?}", &decoded);
-            decoded
-        });
+        for i in 0..length {
+            let key_offset = align_up::<{ ALIGN }>(K::HEADER_SIZE)
+                .checked_mul(i)
+                .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
+            let value_offset = align_up::<{ ALIGN }>(V::HEADER_SIZE)
+                .checked_mul(i)
+                .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
-        let value_bytes = &buf.chunk()[values_offset + 32..]; // 32 is the offset of the values length
-        println!("value_bytes: {:?}", hex::encode(&value_bytes));
+            let key = K::decode(&keys_data, key_offset)?;
+            let value = V::decode(&values_data, value_offset)?;
 
-        let values = (0..data_length).map(|i| {
-            let value_offset = align_up::<{ ALIGN }>(V::HEADER_SIZE) * i;
-            V::decode(&value_bytes, value_offset).unwrap_or_default()
-        });
-
-        let result: HashMap<K, V> = keys.zip(values).collect();
-
-        if result.len() != data_length {
-            return Err(CodecError::Decoding(DecodingError::InvalidData(format!(
-                "Expected {} elements, but decoded {}",
-                data_length,
-                result.len()
-            ))));
+            result.insert(key, value);
         }
 
         Ok(result)
@@ -368,268 +304,378 @@ where
     }
 }
 
-// impl<T> Encoder for HashSet<T>
-// where
-//     T: Default + Sized + Encoder + Eq + Hash + Ord,
-// {
-//     const HEADER_SIZE: usize = 4 + 8; // length + data_header
+/// Implement encoding for HashSet, SOL_MODE = false
+impl<T, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for HashSet<T>
+where
+    T: Default + Sized + Encoder<B, { ALIGN }, false> + Eq + Hash + Ord,
+{
+    const HEADER_SIZE: usize = 4 + 8; // length + data_header
 
-//     fn encode<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
-//         &self,
-//         buf: &mut BytesMut,
-//         offset: usize,
-//     ) -> Result<(), CodecError> {
-//         let aligned_offset = align_up::<ALIGN>(offset);
-//         let aligned_header_el_size = align_up::<ALIGN>(4);
-//         let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+    fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_el_size = align_up::<ALIGN>(4);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
 
-//         // Ensure buf is large enough for the header
-//         if buf.len() < aligned_offset + aligned_header_size {
-//             buf.resize(aligned_offset + aligned_header_size, 0);
-//         }
+        // Ensure buf is large enough for the header
+        if buf.len() < aligned_offset + aligned_header_size {
+            buf.resize(aligned_offset + aligned_header_size, 0);
+        }
 
-//         // Write set size
-//         write_u32_aligned::<B, ALIGN, SOL_MODE>(buf, aligned_offset, self.len() as u32);
+        // Write set size
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, self.len() as u32);
 
-//         // Make sure set is sorted
-//         let mut entries: Vec<_> = self.iter().collect();
-//         entries.sort();
+        // Make sure set is sorted
+        let mut entries: Vec<_> = self.iter().collect();
+        entries.sort();
 
-//         // Encode values
-//         let mut value_buf = BytesMut::zeroed(align_up::<ALIGN>(T::HEADER_SIZE) * self.len());
-//         for (i, value) in entries.iter().enumerate() {
-//             let value_offset = align_up::<ALIGN>(T::HEADER_SIZE) * i;
-//             value.encode::<B, ALIGN, SOL_MODE>(&mut value_buf, value_offset)?;
-//         }
+        // Encode values
+        let mut value_buf = BytesMut::zeroed(align_up::<ALIGN>(T::HEADER_SIZE) * self.len());
+        for (i, value) in entries.iter().enumerate() {
+            let value_offset = align_up::<ALIGN>(T::HEADER_SIZE) * i;
+            value.encode(&mut value_buf, value_offset)?;
+        }
 
-//         // Write values
-//         write_bytes::<B, ALIGN, SOL_MODE>(
-//             buf,
-//             aligned_offset + aligned_header_el_size,
-//             &value_buf,
-//             entries.len() as u32,
-//         );
+        // Write values
+        write_bytes::<B, ALIGN, false>(
+            buf,
+            aligned_offset + aligned_header_el_size,
+            &value_buf,
+            entries.len() as u32,
+        );
 
-//         Ok(())
-//     }
+        Ok(())
+    }
 
-//     fn decode<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
-//         buf: &impl Buf,
-//         offset: usize,
-//     ) -> Result<Self, CodecError> {
-//         let aligned_offset = align_up::<ALIGN>(offset);
-//         let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+    fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
 
-//         if buf.remaining() < aligned_offset + aligned_header_size {
-//             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-//                 expected: aligned_offset + aligned_header_size,
-//                 found: buf.remaining(),
-//                 msg: "Not enough data to decode HashSet header".to_string(),
-//             }));
-//         }
+        if buf.remaining() < aligned_offset + aligned_header_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + aligned_header_size,
+                found: buf.remaining(),
+                msg: "Not enough data to decode HashSet header".to_string(),
+            }));
+        }
 
-//         let length = read_u32_aligned::<B, ALIGN, SOL_MODE>(buf, aligned_offset)? as usize;
+        let length = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
 
-//         let (data_offset, data_length) =
-//             read_bytes_header::<B, ALIGN, SOL_MODE>(buf, aligned_offset + align_up::<ALIGN>(4))?;
+        let (data_offset, data_length) =
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))?;
 
-//         let mut result = HashSet::with_capacity(length);
+        let mut result = HashSet::with_capacity(length);
 
-//         let value_bytes = &buf.chunk()[data_offset..data_offset + data_length];
+        let value_bytes = &buf.chunk()[data_offset..data_offset + data_length];
 
-//         for i in 0..length {
-//             let value_offset = align_up::<ALIGN>(T::HEADER_SIZE) * i;
-//             let value = T::decode::<B, ALIGN, SOL_MODE>(&value_bytes, value_offset)?;
-//             result.insert(value);
-//         }
+        for i in 0..length {
+            let value_offset = align_up::<ALIGN>(T::HEADER_SIZE) * i;
+            let value = T::decode(&value_bytes, value_offset)?;
+            result.insert(value);
+        }
 
-//         if result.len() != length {
-//             return Err(CodecError::Decoding(DecodingError::InvalidData(format!(
-//                 "Expected {} elements, but decoded {}",
-//                 length,
-//                 result.len()
-//             ))));
-//         }
+        if result.len() != length {
+            return Err(CodecError::Decoding(DecodingError::InvalidData(format!(
+                "Expected {} elements, but decoded {}",
+                length,
+                result.len()
+            ))));
+        }
 
-//         Ok(result)
-//     }
+        Ok(result)
+    }
 
-//     fn partial_decode<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
-//         buf: &impl Buf,
-//         offset: usize,
-//     ) -> Result<(usize, usize), CodecError> {
-//         let aligned_offset = align_up::<ALIGN>(offset);
-//         let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
 
-//         if buf.remaining() < aligned_offset + aligned_header_size {
-//             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-//                 expected: aligned_offset + aligned_header_size,
-//                 found: buf.remaining(),
-//                 msg: "Not enough data to decode HashSet header".to_string(),
-//             }));
-//         }
+        if buf.remaining() < aligned_offset + aligned_header_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + aligned_header_size,
+                found: buf.remaining(),
+                msg: "Not enough data to decode HashSet header".to_string(),
+            }));
+        }
 
-//         let (data_offset, data_length) =
-//             read_bytes_header::<B, ALIGN, SOL_MODE>(buf, aligned_offset + align_up::<ALIGN>(4))?;
+        let (data_offset, data_length) =
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))?;
 
-//         Ok((data_offset, data_length))
-//     }
-// }
+        Ok((data_offset, data_length))
+    }
+}
 
-// #[cfg(test)]
-// mod tests {
-//     use alloc::vec::Vec;
+/// Implement encoding for HashSet, SOL_MODE = true
+impl<T, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for HashSet<T>
+where
+    T: Debug + Default + Sized + Encoder<B, { ALIGN }, true> + Eq + Hash + Ord,
+{
+    const HEADER_SIZE: usize = 32 + 32 + 32; // offset + length + data_header
 
-//     use byteorder::LittleEndian;
-//     use bytes::BytesMut;
-//     use hashbrown::HashMap;
+    fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
 
-//     use super::*;
+        // Ensure buf is large enough for the header
+        if buf.len() < aligned_offset + Self::HEADER_SIZE {
+            buf.resize(aligned_offset + Self::HEADER_SIZE, 0);
+        }
 
-//     #[test]
-//     fn test_nested_map() {
-//         let mut values = HashMap::new();
-//         values.insert(100, HashMap::from([(1, 2), (3, 4)]));
-//         values.insert(3, HashMap::new());
-//         values.insert(1000, HashMap::from([(7, 8), (9, 4)]));
-//         let expected_encoded = "03000000140000000c000000200000005c0000000300000064000000e8030000000000003c000000000000003c00000000000000020000003c000000080000004400000008000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
+        // Write offset size
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, (32) as u32);
 
-//         let mut buf = BytesMut::new();
-//         values
-//             .encode::<LittleEndian, 4, false>(&mut buf, 0)
-//             .unwrap();
-//         let encoded = buf.freeze();
+        // Write set size
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 32, self.len() as u32);
 
-//         assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
+        // Make sure set is sorted
+        let mut entries: Vec<_> = self.iter().collect();
+        entries.sort();
 
-//         let decoded =
-//             HashMap::<i32, HashMap<i32, i32>>::decode::<LittleEndian, 4, false>(&encoded, 0)
-//                 .unwrap();
-//         assert_eq!(values, decoded);
+        // Encode values
+        let mut value_buf = BytesMut::zeroed(align_up::<ALIGN>(T::HEADER_SIZE) * self.len());
+        for (i, value) in entries.iter().enumerate() {
+            let value_offset = align_up::<ALIGN>(T::HEADER_SIZE) * i;
+            value.encode(&mut value_buf, value_offset)?;
+        }
 
-//         let header = HashMap::<i32, HashMap<i32, i32>>::partial_decode::<LittleEndian, 4, false>(
-//             &encoded, 0,
-//         )
-//         .unwrap();
+        // Write data offset
+        let relative_data_offset = buf.len() - aligned_offset - 64;
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 64, relative_data_offset as u32);
 
-//         assert_eq!(header, (20, 104));
-//         println!("Header: {:?}", header);
-//     }
+        // Write values
+        write_bytes_solidity::<B, ALIGN>(buf, buf.len(), &value_buf, entries.len() as u32);
 
-//     #[test]
-//     fn test_simple_map_a8() {
-//         let mut values = HashMap::new();
-//         values.insert(100, 20);
-//         values.insert(3, 5);
-//         values.insert(1000, 60);
-//         let mut buf = BytesMut::new();
-//         values
-//             .encode::<LittleEndian, 8, false>(&mut buf, 0)
-//             .unwrap();
-//         let result = buf.freeze();
+        Ok(())
+    }
 
-//         let encoded_hex = hex::encode(&result);
-//         println!("Encoded: {}", encoded_hex);
+    fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+        const DATA_OFFSET: usize = 32;
 
-//         let decoded = HashMap::<i32, i32>::decode::<LittleEndian, 8, false>(&result, 0).unwrap();
-//         assert_eq!(values, decoded);
-//     }
-//     #[test]
-//     fn test_simple_map_wasm() {
-//         let mut values = HashMap::new();
-//         values.insert(100, 20);
-//         values.insert(3, 5);
-//         values.insert(1000, 60);
-//         let mut buf = BytesMut::new();
-//         values
-//             .encode::<LittleEndian, 4, false>(&mut buf, 0)
-//             .unwrap();
-//         let result = buf.freeze();
+        let aligned_offset = align_up::<{ ALIGN }>(offset);
 
-//         let encoded_hex = hex::encode(&result);
-//         println!("Encoded: {}", encoded_hex);
+        // Check if there's enough data to read the header
+        let header_end = aligned_offset
+            .checked_add(Self::HEADER_SIZE)
+            .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
-//         let decoded = HashMap::<i32, i32>::decode::<LittleEndian, 4, false>(&result, 0).unwrap();
-//         assert_eq!(values, decoded);
-//     }
+        if buf.remaining()
+            < usize::try_from(header_end)
+                .map_err(|_| CodecError::Decoding(DecodingError::Overflow))?
+        {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: header_end as usize,
+                found: buf.remaining(),
+                msg: "Not enough data to decode HashSet header".to_string(),
+            }));
+        }
 
-//     #[test]
-//     fn test_vector_of_maps() {
-//         let values = vec![
-//             HashMap::from([(1, 2), (3, 4)]),
-//             HashMap::new(),
-//             HashMap::from([(7, 8), (9, 4)]),
-//         ];
+        // Read data offset
+        let data_offset = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
 
-//         let mut buf = BytesMut::new();
-//         values
-//             .encode::<LittleEndian, 4, false>(&mut buf, 0)
-//             .unwrap();
+        // Calculate start offset
+        let start_offset = aligned_offset
+            .checked_add(data_offset)
+            .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
-//         let result = buf.freeze();
-//         println!("{}", hex::encode(&result));
-//         let expected_encoded = "030000000c0000005c000000020000003c000000080000004400000008000000000000004c000000000000004c00000000000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
+        // Read length
+        let length = read_u32_aligned::<B, { ALIGN }>(buf, start_offset)? as usize;
+        if length == 0 {
+            return Ok(HashSet::new());
+        }
 
-//         assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
-//         let bytes = result.clone();
-//         let values2 = Vec::decode::<LittleEndian, 4, false>(&bytes, 0).unwrap();
-//         assert_eq!(values, values2);
-//     }
+        println!("length: {}", length);
+        // Read relative data offset (relative to the current offset)
+        let values_offset =
+            read_u32_aligned::<B, { ALIGN }>(buf, start_offset + DATA_OFFSET)? as usize;
 
-//     #[test]
-//     fn test_map_of_vectors() {
-//         let mut values = HashMap::new();
-//         values.insert(vec![0, 1, 2], vec![3, 4, 5]);
-//         values.insert(vec![3, 1, 2], vec![3, 4, 5]);
-//         values.insert(vec![0, 1, 6], vec![3, 4, 5]);
-//         let mut buf = BytesMut::new();
-//         values
-//             .encode::<LittleEndian, 4, false>(&mut buf, 0)
-//             .unwrap();
-//         let result = buf.freeze();
+        println!("values_offset: {}", values_offset);
 
-//         // Note: The expected encoded string might need to be updated based on the new encoding format
-//         let expected_encoded = "0300000014000000480000005c0000004800000003000000240000000c00000003000000300000000c000000030000003c0000000c00000000000000010000000200000000000000010000000600000003000000010000000200000003000000240000000c00000003000000300000000c000000030000003c0000000c000000030000000400000005000000030000000400000005000000030000000400000005000000";
-//         assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
+        // Calculate absolute offset
+        let values_start = values_offset
+            .checked_add(start_offset)
+            .and_then(|sum| sum.checked_add(DATA_OFFSET))
+            .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
-//         let values2 =
-//             HashMap::<Vec<i32>, Vec<i32>>::decode::<LittleEndian, 4, false>(&result, 0).unwrap();
-//         assert_eq!(values, values2);
-//     }
+        println!("values_start: {}", values_start);
 
-//     #[test]
-//     fn test_set() {
-//         let values = HashSet::from([1, 2, 3]);
-//         let mut buf = BytesMut::new();
-//         values
-//             .encode::<LittleEndian, 4, false>(&mut buf, 0)
-//             .unwrap();
-//         let result = buf.freeze();
+        let mut result = HashSet::with_capacity(length);
 
-//         println!("{}", hex::encode(&result));
-//         let expected_encoded = "030000000c0000000c000000010000000200000003000000";
-//         assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
+        let values_data = &buf.chunk()[values_start + 32..];
 
-//         let values2 = HashSet::<i32>::decode::<LittleEndian, 4, false>(&result, 0).unwrap();
-//         assert_eq!(values, values2);
-//     }
+        for i in 0..length {
+            let value_offset = align_up::<{ ALIGN }>(T::HEADER_SIZE)
+                .checked_mul(i)
+                .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
-//     #[test]
-//     fn test_set_is_sorted() {
-//         let values1 = HashSet::from([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-//         let mut buffer1 = BytesMut::new();
-//         values1
-//             .encode::<LittleEndian, 4, false>(&mut buffer1, 0)
-//             .unwrap();
-//         let result1 = buffer1.freeze();
+            let value = T::decode(&values_data, value_offset)?;
+            result.insert(value);
+        }
 
-//         let values2 = HashSet::from([8, 3, 2, 4, 5, 9, 7, 1, 6]);
-//         let mut buffer2 = BytesMut::new();
-//         values2
-//             .encode::<LittleEndian, 4, false>(&mut buffer2, 0)
-//             .unwrap();
-//         let result2 = buffer2.freeze();
+        Ok(result)
+    }
 
-//         assert_eq!(result1, result2);
-//     }
-// }
+    fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+
+        if buf.remaining() < aligned_offset + aligned_header_size {
+            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                expected: aligned_offset + aligned_header_size,
+                found: buf.remaining(),
+                msg: "Not enough data to decode HashSet header".to_string(),
+            }));
+        }
+
+        let data_offset = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
+        let start_offset = aligned_offset + data_offset;
+        let length = read_u32_aligned::<B, { ALIGN }>(buf, start_offset)? as usize;
+        let values_offset = read_u32_aligned::<B, { ALIGN }>(buf, start_offset + 64)? as usize;
+        let values_start = start_offset + 64 + values_offset;
+
+        let data_length = length * align_up::<{ ALIGN }>(T::HEADER_SIZE);
+
+        Ok((values_start + 32, data_length))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use byteorder::{LittleEndian, BE};
+    use bytes::BytesMut;
+    use hashbrown::HashMap;
+
+    use crate::{
+        encoder::{SolidityABI, WasmABI},
+        tests::print_bytes,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_nested_map() {
+        let mut values = HashMap::new();
+        values.insert(100, HashMap::from([(1, 2), (3, 4)]));
+        values.insert(3, HashMap::new());
+        values.insert(1000, HashMap::from([(7, 8), (9, 4)]));
+
+        let mut buf = BytesMut::new();
+        WasmABI::encode(&values, &mut buf, 0).unwrap();
+
+        let encoded = buf.freeze();
+        let expected_encoded = "03000000140000000c000000200000005c0000000300000064000000e8030000000000003c000000000000003c00000000000000020000003c000000080000004400000008000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
+
+        assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
+
+        let decoded = WasmABI::<HashMap<i32, HashMap<i32, i32>>>::decode(&encoded, 0).unwrap();
+        assert_eq!(values, decoded);
+
+        let header =
+            WasmABI::<HashMap<i32, HashMap<i32, i32>>>::partial_decode(&encoded, 0).unwrap();
+
+        assert_eq!(header, (20, 104));
+        println!("Header: {:?}", header);
+    }
+
+    #[test]
+    fn test_vector_of_maps() {
+        let values = vec![
+            HashMap::from([(1, 2), (3, 4)]),
+            HashMap::new(),
+            HashMap::from([(7, 8), (9, 4)]),
+        ];
+
+        let mut buf = BytesMut::new();
+        WasmABI::encode(&values, &mut buf, 0).unwrap();
+
+        let result = buf.freeze();
+        println!("{}", hex::encode(&result));
+
+        let expected_encoded = "030000000c0000005c000000020000003c000000080000004400000008000000000000004c000000000000004c00000000000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
+
+        assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
+        let bytes = result.clone();
+        let values2 = WasmABI::<Vec<HashMap<u32, u32>>>::decode(&bytes, 0).unwrap();
+        assert_eq!(values, values2);
+    }
+
+    #[test]
+    fn test_map_of_vectors() {
+        let mut values = HashMap::new();
+        values.insert(vec![0, 1, 2], vec![3, 4, 5]);
+        values.insert(vec![3, 1, 2], vec![3, 4, 5]);
+        values.insert(vec![0, 1, 6], vec![3, 4, 5]);
+        let mut buf = BytesMut::new();
+
+        WasmABI::encode(&values, &mut buf, 0).unwrap();
+        let encoded = buf.freeze();
+
+        // Note: The expected encoded string might need to be updated based on the new encoding format
+        let expected_encoded = "0300000014000000480000005c0000004800000003000000240000000c00000003000000300000000c000000030000003c0000000c00000000000000010000000200000000000000010000000600000003000000010000000200000003000000240000000c00000003000000300000000c000000030000003c0000000c000000030000000400000005000000030000000400000005000000030000000400000005000000";
+        assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
+
+        let values2 = WasmABI::<HashMap<Vec<i32>, Vec<i32>>>::decode(&encoded, 0).unwrap();
+        assert_eq!(values, values2);
+    }
+
+    #[test]
+    fn test_set() {
+        let values = HashSet::from([1, 2, 3]);
+        let mut buf = BytesMut::new();
+
+        WasmABI::encode(&values, &mut buf, 0).unwrap();
+        let encoded = buf.freeze();
+
+        println!("{}", hex::encode(&encoded));
+        let expected_encoded = "030000000c0000000c000000010000000200000003000000";
+        assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
+
+        let values2 = WasmABI::<HashSet<i32>>::decode(&encoded, 0).unwrap();
+        assert_eq!(values, values2);
+    }
+
+    #[test]
+    fn test_set_is_sorted() {
+        let values1 = HashSet::from([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let mut buf1 = BytesMut::new();
+
+        WasmABI::encode(&values1, &mut buf1, 0).unwrap();
+
+        let values2 = HashSet::from([8, 3, 2, 4, 5, 9, 7, 1, 6]);
+        let mut buf2 = BytesMut::new();
+
+        WasmABI::encode(&values2, &mut buf2, 0).unwrap();
+
+        assert_eq!(&buf1.chunk(), &buf2.chunk());
+    }
+
+    #[test]
+    fn test_set_solidity() {
+        let values = HashSet::from([1, 2, 3]);
+        let mut buf = BytesMut::new();
+        SolidityABI::encode(&values, &mut buf, 0).unwrap();
+        let encoded = buf.freeze();
+        print_bytes::<BE, 32>(&encoded);
+
+        let values2 = SolidityABI::<HashSet<i32>>::decode(&encoded, 0).unwrap();
+        println!("values2: {:?}", values2);
+        assert_eq!(values, values2, "Decoding mismatch for Solidity");
+    }
+
+    #[test]
+    fn test_set_solidity_is_sorted() {
+        let values1 = HashSet::from([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let mut buf1 = BytesMut::new();
+
+        SolidityABI::encode(&values1, &mut buf1, 0).unwrap();
+
+        let values2 = HashSet::from([8, 3, 2, 4, 5, 9, 7, 1, 6]);
+        let mut buf2 = BytesMut::new();
+
+        SolidityABI::encode(&values2, &mut buf2, 0).unwrap();
+
+        assert_eq!(
+            &buf1.chunk(),
+            &buf2.chunk(),
+            "Solidity encoding is not sorted"
+        );
+    }
+}

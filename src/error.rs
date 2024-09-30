@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CodecError {
+    #[error("Overflow error")]
+    Overflow,
     #[error("Encoding error: {0}")]
     Encoding(#[from] EncodingError),
 
@@ -40,6 +42,9 @@ pub enum DecodingError {
 
     #[error("Unexpected end of buf")]
     UnexpectedEof,
+
+    #[error("Overflow error")]
+    Overflow,
 
     #[error("Parsing error: {0}")]
     ParseError(String),
