@@ -1,4 +1,5 @@
 /target
+/codec-derive/target
 /rnd
 alignment.md
 dev.md

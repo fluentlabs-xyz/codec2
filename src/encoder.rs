@@ -229,3 +229,26 @@ pub fn get_aligned_slice<B: ByteOrder, const ALIGN: usize>(
 
     &mut buf[write_offset..write_offset + value_size]
 }
+
+pub fn get_aligned_indices<B: ByteOrder, const ALIGN: usize>(
+    offset: usize,
+    value_size: usize,
+) -> (usize, usize) {
+    let aligned_offset = align_up::<ALIGN>(offset);
+    let word_size = align_up::<ALIGN>(ALIGN.max(value_size));
+    println!(
+        "aligned_offset: {}, word_size: {}",
+        aligned_offset, word_size
+    );
+    println!("value_size: {}", value_size);
+
+    let write_offset = if is_big_endian::<B>() {
+        // For big-endian, return indices at the end of the aligned space
+        aligned_offset + word_size - value_size
+    } else {
+        // For little-endian, return indices at the beginning of the aligned space
+        aligned_offset
+    };
+
+    (write_offset, write_offset + value_size)
+}

@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use crate::{
-    encoder::{align_up, get_aligned_slice, is_big_endian, Encoder},
+    encoder::{align_up, get_aligned_indices, get_aligned_slice, is_big_endian, Encoder},
     error::{CodecError, DecodingError},
 };
 use byteorder::ByteOrder;
@@ -92,13 +92,29 @@ macro_rules! impl_int {
                     buf.resize(aligned_offset + word_size, 0);
                 }
 
-                let mut write_to = get_aligned_slice::<B, ALIGN>(
-                    buf,
+                let (start, end) = get_aligned_indices::<B, ALIGN>(
                     aligned_offset,
                     <Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE,
                 );
 
-                B::$write_method(&mut write_to, *self);
+                B::$write_method(&mut buf[start..end], *self);
+
+                // Fill the rest of the buffer with 0x00 or 0xFF depending on the sign of the
+                // integer
+                let fill_val = if *self > 0 { 0x00 } else { 0xFF };
+
+                println!("start: {}, end: {}", start, end);
+                println!("fill_val: {}", fill_val);
+
+                for i in aligned_offset..start {
+                    buf[i] = fill_val;
+                }
+
+                B::$write_method(&mut buf[start..end], *self);
+
+                for i in end..(aligned_offset + word_size) {
+                    buf[i] = fill_val;
+                }
 
                 Ok(())
             }

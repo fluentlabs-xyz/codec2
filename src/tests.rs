@@ -1,13 +1,23 @@
-use crate::encoder::{is_big_endian, read_u32_aligned, SolidityABI, WasmABI};
+extern crate alloc;
+use crate::{
+    empty::EmptyVec,
+    encoder::{align_up, is_big_endian, read_u32_aligned, Encoder, SolidityABI, WasmABI},
+    error::CodecError,
+};
+use alloc::vec;
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_sol_types::{
+    sol,
     sol_data::{self},
     SolType,
+    SolValue,
 };
-use byteorder::{ByteOrder, BE, LE};
+use byteorder::{BigEndian, ByteOrder, BE, LE};
 use bytes::{Buf, BytesMut};
+use codec_derive::Codec;
+use core::str;
 use hashbrown::HashMap;
 use hex_literal::hex;
-use std::vec;
 
 pub fn print_bytes<B: ByteOrder, const ALIGN: usize>(buf: &[u8]) {
     for (i, chunk) in buf.chunks(ALIGN).enumerate() {
@@ -33,6 +43,82 @@ pub fn print_bytes<B: ByteOrder, const ALIGN: usize>(buf: &[u8]) {
     }
 }
 
+#[derive(Codec, Default, Debug, PartialEq)]
+struct TestStruct {
+    // bool_val: bool,
+    // u8_val: u8,
+    uint_val: (u16, u32, u64),
+    int_val: (i16, i32, i64),
+    // u256_val: alloy_primitives::U256,
+    // address_val: alloy_primitives::Address,
+    // bytes_val: Bytes,
+    // vec_val: Vec<u32>,
+}
+#[test]
+fn test_struct_encoding_sol() {
+    // Create an instance of TestStruct
+    let test_struct = TestStruct {
+        // bool_val: true,
+        // u8_val: 42,
+        uint_val: (1000, 1_000_000, 1_000_000_000),
+        int_val: (-1000, -1_000_000, -1_000_000_000),
+        // u256_val: U256::from(12345),
+        // address_val: Address::repeat_byte(0xAA),
+        // bytes_val: Bytes::from(vec![1, 2, 3, 4, 5]),
+        // vec_val: vec![10, 20, 30],
+    };
+
+    // Encode using our Encoder
+    let mut buf = BytesMut::new();
+    SolidityABI::encode(&test_struct, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
+    println!("Our codec Encoded:");
+    println!("{:?}", hex::encode(&encoded));
+
+    print_bytes::<BE, 32>(&encoded);
+
+    // Create an equivalent structure in alloy_sol_types
+    sol! {
+        struct TestStructSol {
+            // bool bool_val;
+            // uint8 u8_val;
+            (uint16, uint32, uint64) uint_val;
+            (int16, int32, int64) int_val;
+            // uint256 u256_val;
+            // address address_val;
+            // bytes bytes_val;
+            // uint32[] vec_val;
+        }
+    }
+
+    let test_struct_sol = TestStructSol {
+        // bool_val: true,
+        // u8_val: 42,
+        uint_val: (1000, 1_000_000, 1_000_000_000),
+        int_val: (-1000, -1_000_000, -1_000_000_000),
+        // u256_val: U256::from(12345),
+        // address_val: Address::repeat_byte(0xAA),
+        // bytes_val: Bytes::from(vec![1, 2, 3, 4, 5]),
+        // vec_val: vec![10, 20, 30],
+    };
+
+    let alloy_encoded = &test_struct_sol.abi_encode();
+    println!("Alloy Encoded:");
+    println!("{:?}", hex::encode(&alloy_encoded));
+    print_bytes::<BE, 32>(&alloy_encoded);
+
+    // Compare the results
+    assert_eq!(
+        hex::encode(encoded),
+        hex::encode(alloy_encoded),
+        "Encoding mismatch between our Encoder and alloy_sol_types"
+    );
+
+    // // Additionally, we can test decoding
+    // let decoded = SolidityABI::<TestStruct>::decode(&encoded, 0).unwrap();
+    // assert_eq!(test_struct, decoded, "Decoding mismatch");
+}
+
 #[test]
 fn test_solidity_abi_u32_encoding() {
     let test_value: u32 = 0x12345678;
@@ -49,6 +135,35 @@ fn test_solidity_abi_u32_encoding() {
     let decoded = SolidityABI::<u32>::decode(&&alloy_value[..], 0).unwrap();
 
     assert_eq!(decoded, test_value);
+}
+
+#[test]
+fn test_i32_sol() {
+    let test_value: i32 = -0x12345678;
+    let mut buf = BytesMut::new();
+    SolidityABI::<i32>::encode(&test_value, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
+
+    let alloy_value = sol_data::Int::<32>::abi_encode(&test_value);
+
+    println!("Encoded i32: {:?}", hex::encode(&encoded));
+
+    assert_eq!(hex::encode(&encoded), hex::encode(&alloy_value));
+}
+
+#[test]
+fn test_u32_sol() {
+    let test_value: u32 = 0x12345678;
+    let mut buf = BytesMut::new();
+    SolidityABI::<u32>::encode(&test_value, &mut buf, 0).unwrap();
+
+    let encoded = buf.freeze();
+
+    let alloy_value = sol_data::Uint::<32>::abi_encode(&test_value);
+
+    println!("Encoded u32: {:?}", hex::encode(&encoded));
+
+    assert_eq!(hex::encode(&encoded), hex::encode(&alloy_value));
 }
 
 #[test]
