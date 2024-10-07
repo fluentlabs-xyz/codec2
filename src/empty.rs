@@ -11,6 +11,7 @@ pub struct EmptyVec;
 // Implementation for WASM mode (SOL_MODE = false)
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for EmptyVec {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3; // 12 bytes
+    const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -95,6 +96,7 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for EmptyVec
 // Implementation for Solidity mode (SOL_MODE = true)
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for EmptyVec {
     const HEADER_SIZE: usize = 32; // Solidity uses 32 bytes for dynamic array header
+    const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);

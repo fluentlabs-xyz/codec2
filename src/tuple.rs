@@ -10,7 +10,8 @@ impl<T, B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, { ALI
 where
     T: Encoder<B, { ALIGN }, { SOL_MODE }>,
 {
-    const HEADER_SIZE: usize = T::HEADER_SIZE;
+    const HEADER_SIZE: usize = align_up::<ALIGN>(T::HEADER_SIZE);
+    const IS_DYNAMIC: bool = T::IS_DYNAMIC;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         self.0.encode(buf, offset)
@@ -31,7 +32,22 @@ macro_rules! impl_encoder_for_tuple {
         where
             $($T: Encoder<B, {ALIGN}, {SOL_MODE}>,)+
         {
-            const HEADER_SIZE: usize = $($T::HEADER_SIZE +)+ 0;
+            const HEADER_SIZE: usize = {
+                let mut size = 0;
+                $(
+                    size = align_up::<ALIGN>(size);
+                    size += $T::HEADER_SIZE;
+                )+
+                align_up::<ALIGN>(size)
+            };
+
+            const IS_DYNAMIC: bool = {
+                let mut is_dynamic = false;
+                $(
+                    is_dynamic |= $T::IS_DYNAMIC;
+                )+
+                is_dynamic
+            };
 
             fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
                 let mut current_offset = align_up::<ALIGN>(offset);

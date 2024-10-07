@@ -30,6 +30,7 @@ where
     T: Default + Sized + Encoder<B, { ALIGN }, false> + std::fmt::Debug,
 {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
+    const IS_DYNAMIC: bool = true;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_elem_size = align_up::<ALIGN>(4);
@@ -112,6 +113,7 @@ where
     T: Default + Sized + Encoder<B, { ALIGN }, true> + std::fmt::Debug,
 {
     const HEADER_SIZE: usize = 32;
+    const IS_DYNAMIC: bool = true;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
 

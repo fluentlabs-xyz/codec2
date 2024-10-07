@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 pub trait Encoder<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>: Sized {
     /// Returns the header size for this encoder.
     const HEADER_SIZE: usize;
+    const IS_DYNAMIC: bool;
 
     /// Encodes the value into the given buffer at the specified offset.
     ///

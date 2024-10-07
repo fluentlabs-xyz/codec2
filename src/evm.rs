@@ -17,7 +17,7 @@ use std::usize;
 
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
-
+    const IS_DYNAMIC: bool = true;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let elem_size = align_up::<ALIGN>(4);
@@ -53,7 +53,7 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
 
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Bytes {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
-
+    const IS_DYNAMIC: bool = true;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let elem_size = align_up::<ALIGN>(4);
@@ -101,7 +101,7 @@ impl<const N: usize, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, fal
     for FixedBytes<N>
 {
     const HEADER_SIZE: usize = N;
-
+    const IS_DYNAMIC: bool = false;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let slice = get_aligned_slice::<B, ALIGN>(buf, aligned_offset, N);
@@ -133,7 +133,7 @@ impl<const N: usize, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, tru
     for FixedBytes<N>
 {
     const HEADER_SIZE: usize = 32; // Always 32 bytes for Solidity ABI
-
+    const IS_DYNAMIC: bool = false;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<32>(offset); // Always 32-byte aligned for Solidity
         let slice = get_aligned_slice::<B, 32>(buf, aligned_offset, 32);
@@ -167,7 +167,7 @@ macro_rules! impl_evm_fixed {
             Encoder<B, { ALIGN }, { SOL_MODE }> for $typ
         {
             const HEADER_SIZE: usize = if SOL_MODE { 32 } else { <$typ>::len_bytes() };
-
+            const IS_DYNAMIC: bool = false;
             fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
                 let aligned_offset = if SOL_MODE {
                     align_up::<32>(offset)
@@ -259,6 +259,7 @@ impl<
     > Encoder<B, { ALIGN }, { SOL_MODE }> for Uint<BITS, LIMBS>
 {
     const HEADER_SIZE: usize = if SOL_MODE { 32 } else { Self::BYTES };
+    const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = if SOL_MODE {

@@ -17,6 +17,7 @@ where
     V: Default + Sized + Encoder<B, { ALIGN }, false>,
 {
     const HEADER_SIZE: usize = 4 + 8 + 8; // length + keys_header + values_header
+    const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -148,6 +149,8 @@ where
     V: Debug + Default + Sized + Encoder<B, { ALIGN }, true>,
 {
     const HEADER_SIZE: usize = 32 + 32 + 32 + 32; // offset + length + keys_header + values_header
+
+    const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -302,7 +305,7 @@ where
     T: Default + Sized + Encoder<B, { ALIGN }, false> + Eq + Hash + Ord,
 {
     const HEADER_SIZE: usize = 4 + 8; // length + data_header
-
+    const IS_DYNAMIC: bool = true;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_header_el_size = align_up::<ALIGN>(4);
@@ -401,7 +404,7 @@ where
     T: Debug + Default + Sized + Encoder<B, { ALIGN }, true> + Eq + Hash + Ord,
 {
     const HEADER_SIZE: usize = 32 + 32 + 32; // offset + length + data_header
-
+    const IS_DYNAMIC: bool = true;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
 
@@ -411,7 +414,7 @@ where
         }
 
         // Write offset size
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, (32) as u32);
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, 32 as u32);
 
         // Write set size
         write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 32, self.len() as u32);

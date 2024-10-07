@@ -9,6 +9,7 @@ use bytes::{Buf, BytesMut};
 
 impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, SOL_MODE> for u8 {
     const HEADER_SIZE: usize = core::mem::size_of::<u8>();
+    const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -56,6 +57,7 @@ impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, S
 
 impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, SOL_MODE> for bool {
     const HEADER_SIZE: usize = core::mem::size_of::<bool>();
+    const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let value: u8 = if *self { 1 } else { 0 };
@@ -80,6 +82,7 @@ macro_rules! impl_int {
             for $typ
         {
             const HEADER_SIZE: usize = core::mem::size_of::<$typ>();
+            const IS_DYNAMIC: bool = false;
 
             fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
                 let aligned_offset = align_up::<ALIGN>(offset);
@@ -172,6 +175,7 @@ where
     T: Sized + Encoder<B, { ALIGN }, { SOL_MODE }> + Default,
 {
     const HEADER_SIZE: usize = 1 + T::HEADER_SIZE;
+    const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
@@ -263,6 +267,7 @@ where
     T: Sized + Encoder<B, { ALIGN }, { SOL_MODE }> + Default + Copy,
 {
     const HEADER_SIZE: usize = T::HEADER_SIZE * N;
+    const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
