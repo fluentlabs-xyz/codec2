@@ -1,5 +1,5 @@
 use crate::{
-    bytes::{read_bytes, read_bytes_header_solidity, write_bytes},
+    bytes::{read_bytes, read_bytes_header, read_bytes_header_solidity, write_bytes},
     encoder::{
         align_up,
         get_aligned_slice,
@@ -18,20 +18,34 @@ use std::usize;
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
     const IS_DYNAMIC: bool = true;
+    /// Encode the bytes into the buffer.
+    /// First, we encode the header and write it to the given offset.
+    /// After that, we encode the actual data and write it to the end of the buffer.
+    /// Note, for Solidity we need to write offset = actual_data_offset - 32.
+    /// But if offset is 0, we need to write 32.
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let elem_size = align_up::<ALIGN>(4);
+
+        // Ensure the buffer has enough space for the offset + header size
         if buf.len() < aligned_offset + elem_size {
             buf.resize(aligned_offset + elem_size, 0);
         }
 
         // Write the offset of the data (current length of the buffer)
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
+        let current_len = buf.len() as u32;
+        let encoded_offset = if offset == 0 {
+            32 // Special case when offset is 0, we write 32 as required by ABI
+        } else {
+            current_len - 32 // Write actual_data_offset - 32
+        };
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, encoded_offset);
 
-        // Write actual data
-        let _ = write_bytes::<B, ALIGN, true>(buf, aligned_offset, self, self.len() as u32);
+        // Write the actual data to the buffer at the current length
+        let data_start = buf.len(); // Where the actual data will start
+        let _ = write_bytes::<B, ALIGN, true>(buf, data_start, self, self.len() as u32);
 
-        // Ensure the buffer is aligned
+        // Add padding if necessary to ensure the buffer remains aligned
         if buf.len() % ALIGN != 0 {
             let padding = ALIGN - (buf.len() % ALIGN);
             buf.resize(buf.len() + padding, 0);
@@ -41,7 +55,15 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+        println!("op.bytes.decode.sol_mode");
+        println!("offset: {:?}", offset);
+
+        let (data_offset, data_len) = read_bytes_header::<B, ALIGN, true>(buf, offset)?;
+        println!(">>>Data offset: {}, Data length: {}", data_offset, data_len);
+
         let data = read_bytes::<B, ALIGN, true>(buf, offset)?;
+
+        println!("data: {:?}", &data.chunk()[..]);
 
         Ok(Self::from(data))
     }

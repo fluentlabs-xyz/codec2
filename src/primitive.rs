@@ -106,9 +106,6 @@ macro_rules! impl_int {
                 // integer
                 let fill_val = if *self > 0 { 0x00 } else { 0xFF };
 
-                println!("start: {}, end: {}", start, end);
-                println!("fill_val: {}", fill_val);
-
                 for i in aligned_offset..start {
                     buf[i] = fill_val;
                 }

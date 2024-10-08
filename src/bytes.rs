@@ -119,18 +119,25 @@ pub fn read_bytes_header_wasm<B: ByteOrder, const ALIGN: usize>(
     Ok((data_offset, data_len))
 }
 
+// Reads the header of the bytes data in Solidity format
+// and return real offset to the data (skip offset and length);
+// offset - offset to the data_offset
+// data_offset - offset to the data_len - 32 bytes
+//
 pub fn read_bytes_header_solidity<B: ByteOrder, const ALIGN: usize>(
     buf: &impl Buf,
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
+    println!("op.read_bytes_header_solidity");
     let aligned_offset = align_up::<ALIGN>(offset);
 
     let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
-    let element_offset = data_offset + ALIGN;
 
-    let element_len = read_u32_aligned::<B, ALIGN>(buf, data_offset)? as usize;
+    println!(">>data_offset: {}", data_offset);
+    let data_len = read_u32_aligned::<B, ALIGN>(buf, data_offset + 32)? as usize;
 
-    Ok((element_offset, element_len))
+    // We add 32 bytes to the solidity offset, so our offset points to the start of the data
+    Ok((data_offset + 32 + 32, data_len))
 }
 
 /// Reads the header of the bytes data in Solidity or WASM compatible format
@@ -159,6 +166,7 @@ pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
     offset: usize,
 ) -> Result<Bytes, CodecError> {
     let (data_offset, data_len) = read_bytes_header::<B, ALIGN, SOL_MODE>(buf, offset)?;
+    println!("Data offset: {}, Data length: {}", data_offset, data_len);
 
     let data = if SOL_MODE {
         buf.chunk()[data_offset..data_offset + data_len].to_vec()
@@ -173,8 +181,13 @@ mod tests {
 
     use super::*;
     use crate::encoder::{SolidityABI, WasmABI};
+    use alloy_sol_types::{
+        sol,
+        sol_data::{self},
+        SolType,
+        SolValue,
+    };
     use byteorder::{BigEndian, LE};
-
     #[test]
     fn test_write_bytes_sol() {
         let mut buf = BytesMut::new();
@@ -214,7 +227,13 @@ mod tests {
         let mut buf = BytesMut::new();
         SolidityABI::encode(&original, &mut buf, 0).unwrap();
 
-        let (offset, size) = read_bytes_header::<BigEndian, 32, true>(&buf, 0).unwrap();
+        let encoded = buf.freeze();
+
+        let encoded_alloy = &sol_data::Bytes::abi_encode(&original)[..];
+
+        println!("alloy encoded: {:?}", encoded_alloy);
+        println!("encoded: {:?}", hex::encode(&encoded));
+        let (offset, size) = read_bytes_header::<BigEndian, 32, true>(&encoded, 0).unwrap();
 
         println!("Offset: {}, Size: {}", offset, size);
 

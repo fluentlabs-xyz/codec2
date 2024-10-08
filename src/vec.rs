@@ -122,12 +122,13 @@ where
             buf.resize(aligned_offset + 32, 0);
         }
 
-        // Write offset
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
+        // Rigth header offset
+        let current_len = buf.len() as u32;
+        let encoded_offset = if offset == 0 { 32 } else { current_len - 32 };
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, encoded_offset);
 
         if self.is_empty() {
             write_u32_aligned::<B, ALIGN>(buf, buf.len(), 0);
-
             return Ok(());
         }
 
@@ -169,6 +170,9 @@ where
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+        println!("vec->partial decode");
+        println!("offset: {}", offset);
+        println!("buf.len(): {}", &buf.chunk().len());
         read_bytes_header::<B, ALIGN, true>(buf, offset)
     }
 }
