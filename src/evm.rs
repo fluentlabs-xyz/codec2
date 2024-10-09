@@ -16,25 +16,26 @@ use bytes::{Buf, BytesMut};
 use std::usize;
 
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
-    const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
+    const HEADER_SIZE: usize = 32;
     const IS_DYNAMIC: bool = true;
-    /// Encode the bytes into the buffer.
+
+    /// Encode the bytes into the buffer for Solidity mode.
     /// First, we encode the header and write it to the given offset.
     /// After that, we encode the actual data and write it to the end of the buffer.
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        let elem_size = align_up::<ALIGN>(4);
+        let aligned_header_size = align_up::<32>(<Self as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
         // Ensure the buffer has enough space for the offset + header size
-        if buf.len() < aligned_offset + elem_size {
-            buf.resize(aligned_offset + elem_size, 0);
+        if buf.len() < aligned_offset + aligned_header_size {
+            buf.resize(aligned_offset + aligned_header_size, 0);
         }
 
+        // Write the offset of the data (current length of the buffer)
         write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
 
         // Write the actual data to the buffer at the current length
-        let data_start = buf.len(); // Where the actual data will start
-        let _ = write_bytes::<B, ALIGN, true>(buf, data_start, self, self.len() as u32);
+        let _ = write_bytes::<B, ALIGN, true>(buf, buf.len(), self, self.len() as u32);
 
         // Add padding if necessary to ensure the buffer remains aligned
         if buf.len() % ALIGN != 0 {
@@ -45,42 +46,48 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
         Ok(())
     }
 
+    /// Decode the bytes from the buffer for Solidity mode.
+    /// Reads the header to get the data offset and size, then reads the actual data.
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        println!("~op.bytes.decode.sol_mode");
-
-        let aligned_offset = align_up::<ALIGN>(offset);
-
-        let (data_offset, data_len) = read_bytes_header::<B, ALIGN, true>(buf, aligned_offset)?;
-        println!("data offset: {:?}", data_offset);
-        println!("data len: {:?}", data_len);
-
-        let data = buf.chunk()[data_offset + 32..data_offset + 32 + data_len as usize].to_vec();
-
-        Ok(Self::from(data))
+        Ok(Self::from(read_bytes::<B, ALIGN, true>(buf, offset)?))
     }
 
+    /// Partially decode the bytes from the buffer for Solidity mode.
+    /// Returns the data offset and size without reading the actual data.
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        read_bytes_header_solidity::<B, ALIGN>(buf, offset)
+        read_bytes_header::<B, ALIGN, true>(buf, offset)
     }
 }
 
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Bytes {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
     const IS_DYNAMIC: bool = true;
+
+    /// Encode the bytes into the buffer.
+    /// First, we encode the header and write it to the given offset.
+    /// After that, we encode the actual data and write it to the end of the buffer.
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        let elem_size = align_up::<ALIGN>(4);
-        if buf.len() < aligned_offset + elem_size {
-            buf.resize(aligned_offset + elem_size, 0);
+        let aligned_header_size =
+            align_up::<ALIGN>(<Self as Encoder<B, ALIGN, false>>::HEADER_SIZE);
+        let aligned_el_size = align_up::<ALIGN>(core::mem::size_of::<u32>());
+
+        // Ensure the buffer has enough space for the offset + header size
+        if buf.len() < aligned_offset + aligned_header_size {
+            buf.resize(aligned_offset + aligned_header_size, 0);
         }
 
         // Write the offset of the data (current length of the buffer)
         write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
 
-        // Write actual data
-        let _ = write_bytes::<B, ALIGN, false>(buf, aligned_offset, self, self.len() as u32);
+        let _ = write_bytes::<B, ALIGN, false>(
+            buf,
+            aligned_offset + aligned_el_size,
+            self,
+            self.len() as u32,
+        );
 
-        // Ensure the buffer is aligned
+        // Add padding if necessary to ensure the buffer remains aligned
         if buf.len() % ALIGN != 0 {
             let padding = ALIGN - (buf.len() % ALIGN);
             buf.resize(buf.len() + padding, 0);
@@ -89,23 +96,16 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Bytes {
         Ok(())
     }
 
+    /// Decode the bytes from the buffer.
+    /// Reads the header to get the data offset and size, then reads the actual data.
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
-        let (data_offset, _data_size) =
-            <Self as Encoder<B, { ALIGN }, false>>::partial_decode(buf, aligned_offset)?;
-
-        let data = read_bytes::<B, ALIGN, false>(buf, data_offset)?;
-
-        Ok(Self::from(data))
+        Ok(Self::from(read_bytes::<B, ALIGN, false>(buf, offset)?))
     }
 
+    /// Partially decode the bytes from the buffer.
+    /// Returns the data offset and size without reading the actual data.
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
-        let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
-        let data_size = read_u32_aligned::<B, ALIGN>(buf, aligned_offset + 4)? as usize;
-        Ok((data_offset, data_size))
+        read_bytes_header::<B, ALIGN, false>(buf, offset)
     }
 }
 

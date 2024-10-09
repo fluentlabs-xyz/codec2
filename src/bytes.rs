@@ -115,7 +115,7 @@ pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
     let (data_offset, data_len) = read_bytes_header::<B, ALIGN, SOL_MODE>(buf, offset)?;
 
     let data = if SOL_MODE {
-        buf.chunk()[data_offset..data_offset + data_len].to_vec()
+        buf.chunk()[data_offset + 32..data_offset + 32 + data_len].to_vec()
     } else {
         buf.chunk()[data_offset..].to_vec()
     };
@@ -294,11 +294,14 @@ mod tests {
         let mut buf = BytesMut::new();
         WasmABI::encode(&original, &mut buf, 0).unwrap();
 
-        let (offset, size) = read_bytes_header::<LE, 4, false>(&buf, 0).unwrap();
+        let encoded = buf.freeze();
+        println!("encoded: {:?}", hex::encode(&encoded));
+
+        let (offset, size) = read_bytes_header::<LE, 4, false>(&encoded, 4).unwrap();
 
         println!("Offset: {}, Size: {}", offset, size);
 
-        assert_eq!(offset, 8);
+        assert_eq!(offset, 12);
         assert_eq!(size, 5);
     }
 }
