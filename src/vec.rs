@@ -1,6 +1,6 @@
 extern crate alloc;
 use crate::{
-    bytes::{read_bytes_header, read_bytes_wasm, write_bytes_solidity, write_bytes_wasm},
+    bytes::{read_bytes, read_bytes_header, write_bytes_solidity, write_bytes_wasm},
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
     error::{CodecError, DecodingError},
 };
@@ -88,7 +88,7 @@ where
 
         let mut result = Vec::with_capacity(data_len);
 
-        let data = read_bytes_wasm::<B, ALIGN>(buf, aligned_offset + aligned_header_el_size)?;
+        let data = read_bytes::<B, ALIGN, false>(buf, aligned_offset + aligned_header_el_size)?;
 
         // let val_size =
         // println!("val_size: {}", val_size);

@@ -264,12 +264,8 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for TestStruc
         // skip first dynamic offset
         let mut tmp = &buf.chunk()[32..];
 
-        println!("1. current_offset: {:?}", current_offset);
         let bool_val = <bool as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
         current_offset += align_up::<ALIGN>(<bool as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        println!("2. current_offset: {:?}", current_offset);
-        println!("bool_val: {:?}", bool_val);
 
         let u8_val = <u8 as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
         current_offset += align_up::<ALIGN>(<u8 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
@@ -278,8 +274,6 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for TestStruc
             <(u16, u32, u64) as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
         current_offset +=
             align_up::<ALIGN>(<(u16, u32, u64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        println!("uint_val: {:?}", uint_val);
 
         let int_val =
             <(i16, i32, i64) as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
@@ -292,17 +286,11 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for TestStruc
         let address_val = <Address as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
         current_offset += align_up::<ALIGN>(<Address as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        println!("address_val: {:?}", address_val);
-
         // Decode dynamic fields
-        println!(">>>current_offset: {:?}", current_offset);
+
         let bytes_val = <Bytes as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset += 32;
+        current_offset += align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        println!("bytes_val: {:?}", bytes_val);
-
-        // println!(">>>current_offset: {:?}", current_offset);
-        // // println!("buf: {:?}", &buf.chunk()[..]);
         let vec_val = <Vec<u32> as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
 
         println!("vec_val: {:?}", vec_val);
