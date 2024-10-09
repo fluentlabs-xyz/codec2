@@ -10,19 +10,18 @@ use bytes::{Buf, BytesMut};
 
 /// We encode dynamic arrays as following:
 /// - header
-/// - + length - number of elements inside vector
-/// - + offset - offset inside structure
-/// - + size - number of encoded bytes
+///   - length: number of elements inside vector
+///   - offset: offset inside structure
+///   - size: number of encoded bytes
 /// - body
-/// - + raw bytes of the vector
+///   - raw bytes of the vector
 ///
-///
-/// For solidity we don't have size.
+/// For Solidity, we don't have size:
 /// - header
-/// - + offset
+///   - offset
 /// - body
-/// - + length
-/// - + raw bytes of the vector
+///   - length
+///   - raw bytes of the vector
 ///
 /// Implementation for non-Solidity mode
 impl<T, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Vec<T>
@@ -31,39 +30,39 @@ where
 {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
     const IS_DYNAMIC: bool = true;
+
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_elem_size = align_up::<ALIGN>(4);
         let aligned_header_size = aligned_elem_size * 3;
 
-        // Check if we can store header
+        // Ensure buffer can store header
         if buf.len() < aligned_offset + aligned_header_size {
             buf.resize(aligned_offset + aligned_header_size, 0);
         }
 
+        // Write length of the vector
         write_u32_aligned::<B, ALIGN>(buf, aligned_offset, self.len() as u32);
 
         if self.is_empty() {
+            // Write offset and size for empty vector
             write_u32_aligned::<B, ALIGN>(
                 buf,
                 aligned_offset + aligned_elem_size,
                 aligned_header_size as u32,
             );
             write_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2, 0);
-
             return Ok(());
         }
 
         // Encode values
         let mut value_encoder = BytesMut::zeroed(ALIGN.max(T::HEADER_SIZE) * self.len());
-
         for (index, obj) in self.iter().enumerate() {
             let elem_offset = ALIGN.max(T::HEADER_SIZE) * index;
             obj.encode(&mut value_encoder, elem_offset)?;
         }
 
         let data = value_encoder.freeze();
-
         write_bytes_wasm::<B, ALIGN>(buf, aligned_offset + aligned_elem_size, &data);
 
         Ok(())
@@ -87,15 +86,11 @@ where
         }
 
         let mut result = Vec::with_capacity(data_len);
-
         let data = read_bytes::<B, ALIGN, false>(buf, aligned_offset + aligned_header_el_size)?;
 
-        // let val_size =
-        // println!("val_size: {}", val_size);
         for i in 0..data_len {
             let elem_offset = i * align_up::<ALIGN>(T::HEADER_SIZE);
             let value = T::decode(&data, elem_offset)?;
-
             result.push(value);
         }
 
@@ -107,7 +102,7 @@ where
     }
 }
 
-// Implementation forSolidity mode
+// Implementation for Solidity mode
 impl<T, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Vec<T>
 where
     T: Default + Sized + Encoder<B, { ALIGN }, true> + std::fmt::Debug,
@@ -117,31 +112,29 @@ where
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        println!("buf size: {:?}", &buf.len());
 
-        // Check if we can store header
+        // Ensure buffer can store header
         if buf.len() < aligned_offset + Self::HEADER_SIZE {
             buf.resize(aligned_offset + Self::HEADER_SIZE, 0);
         }
+
         // Write offset
         write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
 
         if self.is_empty() {
-            // Write length
+            // Write length for empty vector
             write_u32_aligned::<B, ALIGN>(buf, buf.len(), 0);
             return Ok(());
         }
 
         // Encode values
         let mut value_encoder = BytesMut::zeroed(32 * self.len());
-
         for (index, obj) in self.iter().enumerate() {
             let elem_offset = ALIGN.max(T::HEADER_SIZE) * index;
             obj.encode(&mut value_encoder, elem_offset)?;
         }
 
         let data = value_encoder.freeze();
-
         write_bytes_solidity::<B, ALIGN>(
             buf,
             aligned_offset + Self::HEADER_SIZE,
@@ -153,46 +146,19 @@ where
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        println!("~op.decode.vec");
         let aligned_offset = align_up::<ALIGN>(offset);
-        println!("~aligned_offset: {}", aligned_offset);
-
         let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)?;
-        println!("~data_offset: {}", data_offset);
-
-        // // FIXME: somehow we need to fix this one:
-        // // THIS VERSION IS WORKS FOR SOLIDITY MODE STRUCT TEST
-        // let data_len = read_u32_aligned::<B, ALIGN>(buf, (data_offset + 32) as usize)? as usize;
-        // println!("~data_len: {}", data_len);
-        // // Read actual data skip header (offset) and size (32 bytes)
-        // let chunk = &buf.chunk()[(data_offset + 64) as usize..];
-        // // failures:
-        // // bytes::tests::test_read_bytes_header_solidity
-        // // tests::test_empty_bytes_solidity
-        // // tests::test_empty_vector
-        // // tests::test_vec_partial_decoding_solidity
-        // // tests::test_vec_solidity_abi_nested
-        // // tests::test_vec_solidity_abi_simple
-        // // vec::tests::test_vec_u32_solidity_mode
-
-        // THIS VERSION WORKS FOR VECTORS
-        let data_len = read_u32_aligned::<B, ALIGN>(buf, (data_offset) as usize)? as usize;
-        println!("~data_len: {}", data_len);
-        let chunk = &buf.chunk()[(data_offset + 32) as usize..];
-        // //     failures:
-        // // bytes::tests::test_read_bytes_header_solidity
-        // // tests::test_empty_bytes_solidity
-        // // tests::test_struct_encoding_sol
-        // // tests::test_vec_partial_decoding_solidity
+        let data_len = read_u32_aligned::<B, ALIGN>(buf, data_offset as usize)? as usize;
 
         if data_len == 0 {
             return Ok(Vec::new());
         }
-        let mut result = Vec::with_capacity(3);
+
+        let mut result = Vec::with_capacity(data_len);
+        let chunk = &buf.chunk()[(data_offset + 32) as usize..];
 
         for i in 0..data_len {
             let elem_offset = i * align_up::<ALIGN>(T::HEADER_SIZE);
-
             let value = T::decode(&chunk, elem_offset)?;
             result.push(value);
         }
@@ -200,45 +166,11 @@ where
         Ok(result)
     }
 
-    // fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-    //     println!("~op.decode.vec");
-    //     let aligned_offset = align_up::<ALIGN>(offset);
-    //     println!("~aligned_offset: {}", aligned_offset);
-    //     // Читаем длину вектора
-    //     let data_len = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
-    //     println!("~data_len: {}", data_len);
-    //     if data_len == 0 {
-    //         return Ok(Vec::new());
-    //     }
-
-    //     let mut result = Vec::with_capacity(data_len);
-    //     let data_start = aligned_offset + 32; // Начало данных после поля длины
-
-    //     for i in 0..data_len {
-    //         let elem_offset = if T::IS_DYNAMIC {
-    //             // Для динамических типов читаем смещение для каждого элемента
-    //             let elem_offset_relative =
-    //                 read_u32_aligned::<B, ALIGN>(buf, data_start + i * 32)? as usize;
-    //             elem_offset_relative
-    //         } else {
-    //             // Для статических типов вычисляем смещение напрямую
-    //             data_start + i * align_up::<ALIGN>(T::HEADER_SIZE)
-    //         };
-
-    //         let value = T::decode(buf, elem_offset)?;
-    //         result.push(value);
-    //     }
-
-    //     Ok(result)
-    // }
-
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        // println!("vec->partial decode");
-        // println!("offset: {}", offset);
-        // println!("buf.len(): {}", &buf.chunk().len());
         read_bytes_header::<B, ALIGN, true>(buf, offset)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
