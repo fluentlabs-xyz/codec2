@@ -89,11 +89,6 @@ where
         )
         .unwrap();
 
-        println!(
-            "values_offset: {}, values_length: {}",
-            values_offset, values_length
-        );
-
         let key_bytes = &buf.chunk()[keys_offset..keys_offset + keys_length];
         let value_bytes = &buf.chunk()[values_offset..values_offset + values_length];
 
@@ -193,7 +188,6 @@ where
         for (i, (_, value)) in entries.iter().enumerate() {
             let value_offset = align_up::<ALIGN>(V::HEADER_SIZE) * i;
             value.encode(&mut value_buf, value_offset)?;
-            // println!("value_buf: {:?}", hex::encode(&value_buf));
         }
 
         write_bytes_solidity::<B, ALIGN>(buf, buf.len(), &value_buf, entries.len() as u32);
@@ -475,20 +469,15 @@ where
             return Ok(HashSet::new());
         }
 
-        println!("length: {}", length);
         // Read relative data offset (relative to the current offset)
         let values_offset =
             read_u32_aligned::<B, { ALIGN }>(buf, start_offset + DATA_OFFSET)? as usize;
-
-        println!("values_offset: {}", values_offset);
 
         // Calculate absolute offset
         let values_start = values_offset
             .checked_add(start_offset)
             .and_then(|sum| sum.checked_add(DATA_OFFSET))
             .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
-
-        println!("values_start: {}", values_start);
 
         let mut result = HashSet::with_capacity(length);
 

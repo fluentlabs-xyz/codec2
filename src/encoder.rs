@@ -130,9 +130,7 @@ pub fn write_u32_aligned<B: ByteOrder, const ALIGN: usize>(
 ) {
     let aligned_value_size = align_up::<ALIGN>(4);
 
-    if buf.len() < offset + aligned_value_size {
-        buf.resize(offset + aligned_value_size, 0);
-    }
+    ensure_buf_size(buf, offset + aligned_value_size);
 
     if is_big_endian::<B>() {
         // For big-endian, copy to the end of the aligned array
@@ -216,9 +214,7 @@ pub fn get_aligned_slice<B: ByteOrder, const ALIGN: usize>(
     let word_size = align_up::<ALIGN>(ALIGN.max(value_size));
 
     // Ensure the buffer is large enough
-    if buf.len() < aligned_offset + word_size {
-        buf.resize(aligned_offset + word_size, 0);
-    }
+    ensure_buf_size(buf, aligned_offset + word_size);
 
     let write_offset = if is_big_endian::<B>() {
         // For big-endian, return slice at the end of the aligned space
@@ -247,4 +243,11 @@ pub fn get_aligned_indices<B: ByteOrder, const ALIGN: usize>(
     };
 
     (write_offset, write_offset + value_size)
+}
+
+/// Ensure the buffer is large enough to hold the data
+pub fn ensure_buf_size(buf: &mut BytesMut, required_size: usize) {
+    if buf.len() < required_size {
+        buf.resize(required_size, 0);
+    }
 }
