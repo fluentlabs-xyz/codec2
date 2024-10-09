@@ -198,84 +198,114 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for TestStruc
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         println!("xxxxx");
-        let mut current_offset = offset;
-        if <Self as Encoder<B, ALIGN, true>>::IS_DYNAMIC {
-            write_u32_aligned::<B, ALIGN>(buf, offset, 32u32);
-            current_offset += align_up::<ALIGN>(4);
-        }
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let mut current_offset = aligned_offset;
+        let mut tmp = BytesMut::new();
 
         // Кодируем статические поля
-        <bool as Encoder<B, ALIGN, true>>::encode(&self.bool_val, buf, current_offset)?;
-        current_offset += 32;
+        <bool as Encoder<B, ALIGN, true>>::encode(&self.bool_val, &mut tmp, current_offset)?;
 
-        <u8 as Encoder<B, ALIGN, true>>::encode(&self.u8_val, buf, current_offset)?;
-        current_offset += 32;
+        current_offset += align_up::<ALIGN>(<bool as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        <(u16, u32, u64) as Encoder<B, ALIGN, true>>::encode(&self.uint_val, buf, current_offset)?;
-        current_offset += 3 * 32;
+        <u8 as Encoder<B, ALIGN, true>>::encode(&self.u8_val, &mut tmp, current_offset)?;
 
-        <(i16, i32, i64) as Encoder<B, ALIGN, true>>::encode(&self.int_val, buf, current_offset)?;
-        current_offset += 3 * 32;
+        current_offset += align_up::<ALIGN>(<u8 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        <U256 as Encoder<B, ALIGN, true>>::encode(&self.u256_val, buf, current_offset)?;
-        current_offset += 32;
+        println!("current offset: {:?}", current_offset);
 
-        <Address as Encoder<B, ALIGN, true>>::encode(&self.address_val, buf, current_offset)?;
-        current_offset += 32;
+        <(u16, u32, u64) as Encoder<B, ALIGN, true>>::encode(
+            &self.uint_val,
+            &mut tmp,
+            current_offset,
+        )?;
+        current_offset +=
+            align_up::<ALIGN>(<(u16, u32, u64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        // Reserve place for dynamic fields offsets
-        let mut dynamic_fields_offset = current_offset;
-        println!("dynamic_fields_offset: {}", dynamic_fields_offset);
+        <(i16, i32, i64) as Encoder<B, ALIGN, true>>::encode(
+            &self.int_val,
+            &mut tmp,
+            current_offset,
+        )?;
+        current_offset +=
+            align_up::<ALIGN>(<(i16, i32, i64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        let dynamic_fields = 2;
+        <U256 as Encoder<B, ALIGN, true>>::encode(&self.u256_val, &mut tmp, current_offset)?;
+        current_offset += align_up::<ALIGN>(<U256 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        // Check if have enough space to store header for dyn structs
-        if buf.len() < dynamic_fields_offset + (dynamic_fields * 32) {
-            buf.resize(dynamic_fields_offset + (dynamic_fields * 32), 0);
+        <Address as Encoder<B, ALIGN, true>>::encode(&self.address_val, &mut tmp, current_offset)?;
+        current_offset += align_up::<ALIGN>(<Address as Encoder<B, ALIGN, true>>::HEADER_SIZE);
+
+        if tmp.len() < current_offset + 64 {
+            // 64 - 32 + 32
+            tmp.resize(current_offset + 64, 0);
         }
 
-        <Bytes as Encoder<B, ALIGN, true>>::encode(&self.bytes_val, buf, dynamic_fields_offset)?;
+        println!("tmp.len(): {:?}", tmp.len());
+        println!("current_offset: {:?}", current_offset);
 
-        dynamic_fields_offset += 32;
-        <Vec<u32> as Encoder<B, ALIGN, true>>::encode(&self.vec_val, buf, dynamic_fields_offset)?;
+        let bytes_offset = tmp.len();
+        <Bytes as Encoder<B, ALIGN, true>>::encode(&self.bytes_val, &mut tmp, 320)?;
+
+        let vec_offset = tmp.len();
+
+        <Vec<u32> as Encoder<B, ALIGN, true>>::encode(&self.vec_val, &mut tmp, 352)?;
+
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, 32);
+        // println!("buf: {:?}", &buf.chunk()[..]);
+
+        buf.extend_from_slice(&tmp);
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let mut current_offset = offset;
+        let mut current_offset = align_up::<ALIGN>(offset);
 
-        // Пропускаем размер для динамических структур, если необходимо
-        if <Self as Encoder<B, ALIGN, true>>::IS_DYNAMIC {
-            current_offset += align_up::<ALIGN>(4);
-        }
+        // skip first dynamic offset
+        let mut tmp = &buf.chunk()[32..];
 
-        // Декодируем статические поля
-        let bool_val = <bool as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
-        current_offset += 32;
+        println!("1. current_offset: {:?}", current_offset);
+        let bool_val = <bool as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
+        current_offset += align_up::<ALIGN>(<bool as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        let u8_val = <u8 as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
-        current_offset += 32;
+        println!("2. current_offset: {:?}", current_offset);
+        println!("bool_val: {:?}", bool_val);
 
-        let uint_val = <(u16, u32, u64) as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
-        current_offset += 3 * 32;
+        let u8_val = <u8 as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
+        current_offset += align_up::<ALIGN>(<u8 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        let int_val = <(i16, i32, i64) as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
-        current_offset += 3 * 32;
+        let uint_val =
+            <(u16, u32, u64) as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
+        current_offset +=
+            align_up::<ALIGN>(<(u16, u32, u64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
 
-        let u256_val = <U256 as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
-        current_offset += 32;
+        println!("uint_val: {:?}", uint_val);
 
-        let address_val = <Address as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
-        current_offset += 32;
+        let int_val =
+            <(i16, i32, i64) as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
+        current_offset +=
+            align_up::<ALIGN>(<(i16, i32, i64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
+
+        let u256_val = <U256 as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
+        current_offset += align_up::<ALIGN>(<U256 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
+
+        let address_val = <Address as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
+        current_offset += align_up::<ALIGN>(<Address as Encoder<B, ALIGN, true>>::HEADER_SIZE);
+
+        println!("address_val: {:?}", address_val);
 
         // Decode dynamic fields
-
-        let bytes_val = <Bytes as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
+        println!(">>>current_offset: {:?}", current_offset);
+        let bytes_val = <Bytes as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
         current_offset += 32;
-        println!("bytes_val: {:?}", bytes_val);
-        let vec_val = <Vec<u32> as Encoder<B, ALIGN, true>>::decode(buf, current_offset)?;
 
+        println!("bytes_val: {:?}", bytes_val);
+
+        // println!(">>>current_offset: {:?}", current_offset);
+        // // println!("buf: {:?}", &buf.chunk()[..]);
+        let vec_val = <Vec<u32> as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
+
+        println!("vec_val: {:?}", vec_val);
         Ok(TestStruct {
             bool_val,
             u8_val,
@@ -382,7 +412,7 @@ fn test_struct_encoding_sol() {
 
     // Additionally, we can test decoding
     let decoded = SolidityABI::<TestStruct>::decode(&encoded, 0).unwrap();
-    assert_eq!(test_struct, decoded, "Decoding mismatch");
+    assert_eq!(decoded, test_struct, "Decoding mismatch");
 }
 
 #[test]
@@ -590,10 +620,12 @@ fn test_vec_solidity_abi_nested() {
     let expected_encoded = hex!(
         "00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000005"
     );
-
+    println!("codec2");
+    print_bytes::<BE, 32>(&encoded);
+    println!("solidity");
+    print_bytes::<BE, 32>(&alloy_value);
+    // println!("Encoded Vec: {:?}", hex::encode(&encoded));
     assert_eq!(encoded.to_vec(), alloy_value.to_vec());
-
-    println!("Encoded Vec: {:?}", hex::encode(&encoded));
 
     let decoded_alloy = sol_data::Array::<sol_data::Array<sol_data::Uint<32>>>::abi_decode(
         &expected_encoded,
@@ -678,7 +710,7 @@ fn test_vec_partial_decoding_solidity() {
     // offset, length
     let decoded_header = SolidityABI::<Vec<u32>>::partial_decode(&&alloy_value[..], 0).unwrap();
 
-    assert_eq!(decoded_header, (64, 5));
+    assert_eq!(decoded_header, (32, 5));
 }
 
 #[test]

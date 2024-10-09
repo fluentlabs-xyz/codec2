@@ -114,20 +114,20 @@ where
 {
     const HEADER_SIZE: usize = 32;
     const IS_DYNAMIC: bool = true;
+
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
+        println!("buf size: {:?}", &buf.len());
 
         // Check if we can store header
-        if buf.len() < aligned_offset + 32 {
-            buf.resize(aligned_offset + 32, 0);
+        if buf.len() < aligned_offset + Self::HEADER_SIZE {
+            buf.resize(aligned_offset + Self::HEADER_SIZE, 0);
         }
-
-        // Rigth header offset
-        let current_len = buf.len() as u32;
-        let encoded_offset = if offset == 0 { 32 } else { current_len - 32 };
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, encoded_offset);
+        // Write offset
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
 
         if self.is_empty() {
+            // Write length
             write_u32_aligned::<B, ALIGN>(buf, buf.len(), 0);
             return Ok(());
         }
@@ -142,37 +142,100 @@ where
 
         let data = value_encoder.freeze();
 
-        write_bytes_solidity::<B, ALIGN>(buf, aligned_offset + 32, &data, self.len() as u32);
+        write_bytes_solidity::<B, ALIGN>(
+            buf,
+            aligned_offset + Self::HEADER_SIZE,
+            &data,
+            self.len() as u32,
+        );
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+        println!("~op.decode.vec");
         let aligned_offset = align_up::<ALIGN>(offset);
+        println!("~aligned_offset: {}", aligned_offset);
 
-        // data_len - number of elements in the vector
-        let (data_offset, data_len) = Self::partial_decode(buf, aligned_offset)?;
+        let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)?;
+        println!("~data_offset: {}", data_offset);
+
+        // // FIXME: somehow we need to fix this one:
+        // // THIS VERSION IS WORKS FOR SOLIDITY MODE STRUCT TEST
+        // let data_len = read_u32_aligned::<B, ALIGN>(buf, (data_offset + 32) as usize)? as usize;
+        // println!("~data_len: {}", data_len);
+        // // Read actual data skip header (offset) and size (32 bytes)
+        // let chunk = &buf.chunk()[(data_offset + 64) as usize..];
+        // // failures:
+        // // bytes::tests::test_read_bytes_header_solidity
+        // // tests::test_empty_bytes_solidity
+        // // tests::test_empty_vector
+        // // tests::test_vec_partial_decoding_solidity
+        // // tests::test_vec_solidity_abi_nested
+        // // tests::test_vec_solidity_abi_simple
+        // // vec::tests::test_vec_u32_solidity_mode
+
+        // THIS VERSION WORKS FOR VECTORS
+        let data_len = read_u32_aligned::<B, ALIGN>(buf, (data_offset) as usize)? as usize;
+        println!("~data_len: {}", data_len);
+        let chunk = &buf.chunk()[(data_offset + 32) as usize..];
+        // //     failures:
+        // // bytes::tests::test_read_bytes_header_solidity
+        // // tests::test_empty_bytes_solidity
+        // // tests::test_struct_encoding_sol
+        // // tests::test_vec_partial_decoding_solidity
 
         if data_len == 0 {
             return Ok(Vec::new());
         }
-
-        let mut result = Vec::with_capacity(data_len);
+        let mut result = Vec::with_capacity(3);
 
         for i in 0..data_len {
             let elem_offset = i * align_up::<ALIGN>(T::HEADER_SIZE);
 
-            let value = T::decode(&&buf.chunk()[data_offset..], elem_offset)?;
+            let value = T::decode(&chunk, elem_offset)?;
             result.push(value);
         }
 
         Ok(result)
     }
 
+    // fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+    //     println!("~op.decode.vec");
+    //     let aligned_offset = align_up::<ALIGN>(offset);
+    //     println!("~aligned_offset: {}", aligned_offset);
+    //     // Читаем длину вектора
+    //     let data_len = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
+    //     println!("~data_len: {}", data_len);
+    //     if data_len == 0 {
+    //         return Ok(Vec::new());
+    //     }
+
+    //     let mut result = Vec::with_capacity(data_len);
+    //     let data_start = aligned_offset + 32; // Начало данных после поля длины
+
+    //     for i in 0..data_len {
+    //         let elem_offset = if T::IS_DYNAMIC {
+    //             // Для динамических типов читаем смещение для каждого элемента
+    //             let elem_offset_relative =
+    //                 read_u32_aligned::<B, ALIGN>(buf, data_start + i * 32)? as usize;
+    //             elem_offset_relative
+    //         } else {
+    //             // Для статических типов вычисляем смещение напрямую
+    //             data_start + i * align_up::<ALIGN>(T::HEADER_SIZE)
+    //         };
+
+    //         let value = T::decode(buf, elem_offset)?;
+    //         result.push(value);
+    //     }
+
+    //     Ok(result)
+    // }
+
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        println!("vec->partial decode");
-        println!("offset: {}", offset);
-        println!("buf.len(): {}", &buf.chunk().len());
+        // println!("vec->partial decode");
+        // println!("offset: {}", offset);
+        // println!("buf.len(): {}", &buf.chunk().len());
         read_bytes_header::<B, ALIGN, true>(buf, offset)
     }
 }

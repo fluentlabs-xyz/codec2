@@ -120,24 +120,62 @@ pub fn read_bytes_header_wasm<B: ByteOrder, const ALIGN: usize>(
 }
 
 // Reads the header of the bytes data in Solidity format
-// and return real offset to the data (skip offset and length);
-// offset - offset to the data_offset
-// data_offset - offset to the data_len - 32 bytes
-//
+// and returns:
+// - offset of the data (header not included). So real offset is offset + header_size
+// - size of the data
 pub fn read_bytes_header_solidity<B: ByteOrder, const ALIGN: usize>(
     buf: &impl Buf,
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
-    println!("op.read_bytes_header_solidity");
+    println!("~op.read_bytes_header_solidity");
+    let aligned_offset = align_up::<ALIGN>(offset);
+
+    let mut data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
+    println!("Data offset: {}", data_offset);
+
+    // If the data offset is 32, that means that actual length is the next word, otherwise we
+    if data_offset != 32 {
+        data_offset += 32;
+    }
+
+    let data_len = read_u32_aligned::<B, ALIGN>(buf, data_offset)? as usize;
+    println!("Data length: {}", data_len);
+
+    Ok((data_offset, data_len))
+}
+
+/// Buf should start from the beginning of the data
+/// If we have a nested array, we need to provide buf without the header. It's crucial, because all
+/// offsets sets for the nested arrays are relative to the beginning of the data let original:
+/// Vec<Vec<u32>> = vec![vec![1, 2, 3], vec![4, 5]];
+/// solidity
+
+/// 000 000  : 00 00 00 20   ||  032 |
+/// 032 000  : 00 00 00 02   ||  002 |
+
+/// 000 000  : 00 00 00 40   ||  064 | <---- buf should start here
+/// 032 032  : 00 00 00 c0   ||  192 |
+/// 064 064  : 00 00 00 03   ||  003 |
+/// 096 096  : 00 00 00 01   ||  001 |
+/// 128 128  : 00 00 00 02   ||  002 |
+/// 160 160  : 00 00 00 03   ||  003 |
+/// 192 192  : 00 00 00 02   ||  002 |
+/// 224 224  : 00 00 00 04   ||  004 |
+/// 256 256  : 00 00 00 05   ||  005 |
+pub fn read_bytes_header_solidity2<B: ByteOrder, const ALIGN: usize>(
+    buf: &impl Buf,
+    offset: usize,
+) -> Result<(usize, usize), CodecError> {
+    println!("~op.read_bytes_header_solidity");
     let aligned_offset = align_up::<ALIGN>(offset);
 
     let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
+    println!("Data offset: {}", data_offset);
 
-    println!(">>data_offset: {}", data_offset);
-    let data_len = read_u32_aligned::<B, ALIGN>(buf, data_offset + 32)? as usize;
+    let data_len = read_u32_aligned::<B, ALIGN>(buf, data_offset)? as usize;
+    println!("Data length: {}", data_len);
 
-    // We add 32 bytes to the solidity offset, so our offset points to the start of the data
-    Ok((data_offset + 32 + 32, data_len))
+    Ok((data_offset, data_len))
 }
 
 /// Reads the header of the bytes data in Solidity or WASM compatible format
@@ -147,7 +185,7 @@ pub fn read_bytes_header<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
     match SOL_MODE {
-        true => read_bytes_header_solidity::<B, ALIGN>(buf, offset),
+        true => read_bytes_header_solidity2::<B, ALIGN>(buf, offset),
         false => read_bytes_header_wasm::<B, ALIGN>(buf, offset),
     }
 }
@@ -237,8 +275,31 @@ mod tests {
 
         println!("Offset: {}, Size: {}", offset, size);
 
-        assert_eq!(offset, 64);
+        assert_eq!(offset, 32);
         assert_eq!(size, 5);
+    }
+
+    #[test]
+    fn test_read_bytes_header_solidity2() {
+        let original: Vec<Vec<u32>> = vec![vec![1, 2, 3], vec![4, 5]];
+
+        let mut buf = BytesMut::new();
+        SolidityABI::encode(&original, &mut buf, 0).unwrap();
+
+        let encoded = buf.freeze();
+        println!("encoded: {:?}", hex::encode(&encoded));
+
+        let chunk = &encoded.chunk()[64..];
+
+        // 1st vec
+        let (offset, size) = read_bytes_header_solidity2::<BigEndian, 32>(&chunk, 0).unwrap();
+        assert_eq!(offset, 64);
+        assert_eq!(size, 3);
+
+        // 2nd vec
+        let (offset, size) = read_bytes_header_solidity2::<BigEndian, 32>(&chunk, 32).unwrap();
+        assert_eq!(offset, 192);
+        assert_eq!(size, 2);
     }
 
     #[test]

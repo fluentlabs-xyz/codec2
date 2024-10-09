@@ -11,6 +11,8 @@ bytes = { version = "1.7.1", default-features = false }
 hashbrown = { version = "0.14" }
 thiserror = { version = "1.0.63", default-features = false }
 codec-derive = { path = "codec-derive" }
+hex = "0.4.3"
+
 
 [dev-dependencies]
 hex = "0.4.3"

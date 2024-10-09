@@ -21,8 +21,6 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
     /// Encode the bytes into the buffer.
     /// First, we encode the header and write it to the given offset.
     /// After that, we encode the actual data and write it to the end of the buffer.
-    /// Note, for Solidity we need to write offset = actual_data_offset - 32.
-    /// But if offset is 0, we need to write 32.
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let elem_size = align_up::<ALIGN>(4);
@@ -32,14 +30,7 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
             buf.resize(aligned_offset + elem_size, 0);
         }
 
-        // Write the offset of the data (current length of the buffer)
-        let current_len = buf.len() as u32;
-        let encoded_offset = if offset == 0 {
-            32 // Special case when offset is 0, we write 32 as required by ABI
-        } else {
-            current_len - 32 // Write actual_data_offset - 32
-        };
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, encoded_offset);
+        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
 
         // Write the actual data to the buffer at the current length
         let data_start = buf.len(); // Where the actual data will start
@@ -55,15 +46,15 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        println!("op.bytes.decode.sol_mode");
-        println!("offset: {:?}", offset);
+        println!("~op.bytes.decode.sol_mode");
 
-        let (data_offset, data_len) = read_bytes_header::<B, ALIGN, true>(buf, offset)?;
-        println!(">>>Data offset: {}, Data length: {}", data_offset, data_len);
+        let aligned_offset = align_up::<ALIGN>(offset);
 
-        let data = read_bytes::<B, ALIGN, true>(buf, offset)?;
+        let (data_offset, data_len) = read_bytes_header::<B, ALIGN, true>(buf, aligned_offset)?;
+        println!("data offset: {:?}", data_offset);
+        println!("data len: {:?}", data_len);
 
-        println!("data: {:?}", &data.chunk()[..]);
+        let data = buf.chunk()[data_offset + 32..data_offset + 32 + data_len as usize].to_vec();
 
         Ok(Self::from(data))
     }
