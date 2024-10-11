@@ -1,6 +1,5 @@
 extern crate alloc;
 use crate::{
-    empty::EmptyVec,
     encoder::{
         align_up,
         is_big_endian,
@@ -20,13 +19,12 @@ use alloy_sol_types::{
     SolType,
     SolValue,
 };
-use byteorder::{BigEndian, ByteOrder, BE, LE};
-use bytes::{Buf, BufMut, BytesMut};
+use byteorder::{ByteOrder, BE, LE};
+use bytes::{Buf, BytesMut};
 use codec_derive::Codec;
 use core::str;
 use hashbrown::HashMap;
 use hex_literal::hex;
-use pretty_hex::*;
 
 pub fn print_bytes<B: ByteOrder, const ALIGN: usize>(buf: &[u8]) {
     for (i, chunk) in buf.chunks(ALIGN).enumerate() {
@@ -52,7 +50,7 @@ pub fn print_bytes<B: ByteOrder, const ALIGN: usize>(buf: &[u8]) {
     }
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Codec, Default, Debug, PartialEq)]
 struct TestStruct {
     bool_val: bool,
     u8_val: u8,
@@ -64,282 +62,8 @@ struct TestStruct {
     vec_val: Vec<u32>,
 }
 
-impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for TestStruct {
-    const HEADER_SIZE: usize = 32; // Оффсет 32 байта для динамических структур
-    const IS_DYNAMIC: bool = true;
-
-    fn encode(&self, buf: &mut BytesMut, mut offset: usize) -> Result<(), CodecError> {
-        write_u32_aligned::<B, ALIGN>(buf, offset, 32u32);
-        offset += align_up::<ALIGN>(4);
-
-        let mut data_offset = offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        // Кодируем статические поля
-        <bool as Encoder<B, ALIGN, false>>::encode(&self.bool_val, buf, offset)?;
-        offset += <bool as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        <u8 as Encoder<B, ALIGN, false>>::encode(&self.u8_val, buf, offset)?;
-        offset += <u8 as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        <(u16, u32, u64) as Encoder<B, ALIGN, false>>::encode(&self.uint_val, buf, offset)?;
-        offset += <(u16, u32, u64) as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        <(i16, i32, i64) as Encoder<B, ALIGN, false>>::encode(&self.int_val, buf, offset)?;
-        offset += <(i16, i32, i64) as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        <U256 as Encoder<B, ALIGN, false>>::encode(&self.u256_val, buf, offset)?;
-        offset += <U256 as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        <Address as Encoder<B, ALIGN, false>>::encode(&self.address_val, buf, offset)?;
-        offset += <Address as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        // Кодируем динамические поля
-        write_u32_aligned::<B, ALIGN>(buf, offset, data_offset as u32);
-        <Bytes as Encoder<B, ALIGN, false>>::encode(&self.bytes_val, buf, data_offset)?;
-        data_offset += <Bytes as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        offset += align_up::<ALIGN>(4);
-
-        write_u32_aligned::<B, ALIGN>(buf, offset, data_offset as u32);
-        <Vec<u32> as Encoder<B, ALIGN, false>>::encode(&self.vec_val, buf, data_offset)?;
-        data_offset += <Vec<u32> as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        offset += align_up::<ALIGN>(4);
-
-        Ok(())
-    }
-
-    fn decode(buf: &impl Buf, mut offset: usize) -> Result<Self, CodecError> {
-        // Пропускаем начальный оффсет
-        offset += align_up::<ALIGN>(4);
-
-        let bool_val = <bool as Encoder<B, ALIGN, false>>::decode(buf, offset)?;
-        offset += <bool as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        let u8_val = <u8 as Encoder<B, ALIGN, false>>::decode(buf, offset)?;
-        offset += <u8 as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        let uint_val = <(u16, u32, u64) as Encoder<B, ALIGN, false>>::decode(buf, offset)?;
-        offset += <(u16, u32, u64) as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        let int_val = <(i16, i32, i64) as Encoder<B, ALIGN, false>>::decode(buf, offset)?;
-        offset += <(i16, i32, i64) as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        let u256_val = <U256 as Encoder<B, ALIGN, false>>::decode(buf, offset)?;
-        offset += <U256 as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        let address_val = <Address as Encoder<B, ALIGN, false>>::decode(buf, offset)?;
-        offset += <Address as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        let bytes_offset = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
-        let bytes_val = <Bytes as Encoder<B, ALIGN, false>>::decode(buf, bytes_offset)?;
-        offset += align_up::<ALIGN>(4);
-
-        let vec_offset = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
-        let vec_val = <Vec<u32> as Encoder<B, ALIGN, false>>::decode(buf, vec_offset)?;
-
-        Ok(TestStruct {
-            bool_val,
-            u8_val,
-            uint_val,
-            int_val,
-            u256_val,
-            address_val,
-            bytes_val,
-            vec_val,
-        })
-    }
-
-    fn partial_decode(buf: &impl Buf, mut offset: usize) -> Result<(usize, usize), CodecError> {
-        let mut total_length = <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-
-        // Пропускаем начальный оффсет
-        offset += align_up::<ALIGN>(4);
-
-        let (_, length) = <bool as Encoder<B, ALIGN, false>>::partial_decode(buf, offset)?;
-        offset += <bool as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        total_length += length;
-
-        let (_, length) = <u8 as Encoder<B, ALIGN, false>>::partial_decode(buf, offset)?;
-        offset += <u8 as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        total_length += length;
-
-        let (_, length) =
-            <(u16, u32, u64) as Encoder<B, ALIGN, false>>::partial_decode(buf, offset)?;
-        offset += <(u16, u32, u64) as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        total_length += length;
-
-        let (_, length) =
-            <(i16, i32, i64) as Encoder<B, ALIGN, false>>::partial_decode(buf, offset)?;
-        offset += <(i16, i32, i64) as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        total_length += length;
-
-        let (_, length) = <U256 as Encoder<B, ALIGN, false>>::partial_decode(buf, offset)?;
-        offset += <U256 as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        total_length += length;
-
-        let (_, length) = <Address as Encoder<B, ALIGN, false>>::partial_decode(buf, offset)?;
-        offset += <Address as Encoder<B, ALIGN, false>>::HEADER_SIZE;
-        total_length += length;
-
-        let bytes_offset = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
-        let (_, length) = <Bytes as Encoder<B, ALIGN, false>>::partial_decode(buf, bytes_offset)?;
-        offset += align_up::<ALIGN>(4);
-        total_length += length;
-
-        let vec_offset = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
-        let (_, length) = <Vec<u32> as Encoder<B, ALIGN, false>>::partial_decode(buf, vec_offset)?;
-        total_length += length;
-
-        Ok((offset, total_length))
-    }
-}
-impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for TestStruct {
-    const HEADER_SIZE: usize = 32;
-    const IS_DYNAMIC: bool = true;
-
-    fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        println!("xxxxx");
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let mut current_offset = aligned_offset;
-        let mut tmp = BytesMut::new();
-
-        // Кодируем статические поля
-        <bool as Encoder<B, ALIGN, true>>::encode(&self.bool_val, &mut tmp, current_offset)?;
-
-        current_offset += align_up::<ALIGN>(<bool as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        <u8 as Encoder<B, ALIGN, true>>::encode(&self.u8_val, &mut tmp, current_offset)?;
-
-        current_offset += align_up::<ALIGN>(<u8 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        println!("current offset: {:?}", current_offset);
-
-        <(u16, u32, u64) as Encoder<B, ALIGN, true>>::encode(
-            &self.uint_val,
-            &mut tmp,
-            current_offset,
-        )?;
-        current_offset +=
-            align_up::<ALIGN>(<(u16, u32, u64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        <(i16, i32, i64) as Encoder<B, ALIGN, true>>::encode(
-            &self.int_val,
-            &mut tmp,
-            current_offset,
-        )?;
-        current_offset +=
-            align_up::<ALIGN>(<(i16, i32, i64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        <U256 as Encoder<B, ALIGN, true>>::encode(&self.u256_val, &mut tmp, current_offset)?;
-        current_offset += align_up::<ALIGN>(<U256 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        <Address as Encoder<B, ALIGN, true>>::encode(&self.address_val, &mut tmp, current_offset)?;
-        current_offset += align_up::<ALIGN>(<Address as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        if tmp.len() < current_offset + 64 {
-            // 64 - 32 + 32
-            tmp.resize(current_offset + 64, 0);
-        }
-
-        println!("tmp.len(): {:?}", tmp.len());
-        println!("current_offset: {:?}", current_offset);
-
-        let bytes_offset = tmp.len();
-        <Bytes as Encoder<B, ALIGN, true>>::encode(&self.bytes_val, &mut tmp, 320)?;
-
-        let vec_offset = tmp.len();
-
-        <Vec<u32> as Encoder<B, ALIGN, true>>::encode(&self.vec_val, &mut tmp, 352)?;
-
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, 32);
-        // println!("buf: {:?}", &buf.chunk()[..]);
-
-        buf.extend_from_slice(&tmp);
-
-        Ok(())
-    }
-
-    fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let mut current_offset = align_up::<ALIGN>(offset);
-
-        // skip first dynamic offset
-        let mut tmp = &buf.chunk()[32..];
-
-        let bool_val = <bool as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset += align_up::<ALIGN>(<bool as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        let u8_val = <u8 as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset += align_up::<ALIGN>(<u8 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        let uint_val =
-            <(u16, u32, u64) as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset +=
-            align_up::<ALIGN>(<(u16, u32, u64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        let int_val =
-            <(i16, i32, i64) as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset +=
-            align_up::<ALIGN>(<(i16, i32, i64) as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        let u256_val = <U256 as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset += align_up::<ALIGN>(<U256 as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        let address_val = <Address as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset += align_up::<ALIGN>(<Address as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        // Decode dynamic fields
-
-        let bytes_val = <Bytes as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-        current_offset += align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, true>>::HEADER_SIZE);
-
-        let vec_val = <Vec<u32> as Encoder<B, ALIGN, true>>::decode(&mut tmp, current_offset)?;
-
-        println!("vec_val: {:?}", vec_val);
-        Ok(TestStruct {
-            bool_val,
-            u8_val,
-            uint_val,
-            int_val,
-            u256_val,
-            address_val,
-            bytes_val,
-            vec_val,
-        })
-    }
-
-    fn partial_decode(buf: &impl Buf, mut offset: usize) -> Result<(usize, usize), CodecError> {
-        let mut total_length = 0;
-
-        let (_, length) = <bool as Encoder<B, ALIGN, true>>::partial_decode(buf, offset)?;
-        offset += 32;
-        total_length += length;
-
-        let (_, length) = <u8 as Encoder<B, ALIGN, true>>::partial_decode(buf, offset)?;
-        offset += 32;
-        total_length += length;
-
-        let (_, length) =
-            <(u16, u32, u64) as Encoder<B, ALIGN, true>>::partial_decode(buf, offset)?;
-        offset += 3 * 32;
-        total_length += length;
-
-        let (_, length) =
-            <(i16, i32, i64) as Encoder<B, ALIGN, true>>::partial_decode(buf, offset)?;
-        offset += 3 * 32;
-        total_length += length;
-
-        let (_, length) = <U256 as Encoder<B, ALIGN, true>>::partial_decode(buf, offset)?;
-        offset += 32;
-        total_length += length;
-
-        let (_, length) = <Address as Encoder<B, ALIGN, true>>::partial_decode(buf, offset)?;
-        total_length += length;
-
-        Ok((offset, total_length))
-    }
-}
-
 #[test]
-fn test_struct_encoding_sol() {
+fn test_struct_sol() {
     // Create an instance of TestStruct
     let test_struct = TestStruct {
         bool_val: true,
@@ -356,7 +80,7 @@ fn test_struct_encoding_sol() {
     let mut buf = BytesMut::new();
     SolidityABI::encode(&test_struct, &mut buf, 0).unwrap();
     let encoded = buf.freeze();
-    println!("Our codec Encoded:");
+
     println!("{:?}", hex::encode(&encoded));
 
     print_bytes::<BE, 32>(&encoded);

@@ -10,6 +10,12 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 syn = { version = "2.0.79", default-features = false }
 crypto-hashes = { version = "0.10.0", default-features = false, features = ["include_weak"] }
 proc-macro2 = "1.0"
+lazy_static = { version = "1.5.0", default-features = false }
+
+[dev-dependencies]
+bytes = "1.7.2"
+codec2 = {path = "../"}
+byteorder = "1.5.0"
 
 [lib]
 proc-macro = true
