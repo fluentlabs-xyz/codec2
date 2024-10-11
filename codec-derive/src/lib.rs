@@ -259,18 +259,16 @@ impl CodecStruct {
                 }
 
                 fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-                    let mut current_offset = align_up::<ALIGN>(offset);
+                    let mut aligned_offset = align_up::<ALIGN>(offset);
 
                     let mut tmp = if #is_dynamic {
-                        let offset = read_u32_aligned::<B, ALIGN>(buf, current_offset)? as usize;
-                        if offset == 32 {
-                            &buf.chunk()[32..]
-                        } else {
-                            &buf.chunk()
-                        }
+                        let offset = read_u32_aligned::<B, ALIGN>(&buf.chunk(), aligned_offset)? as usize;
+                        &buf.chunk()[offset..]
                     } else {
-                        buf.chunk()
+                        &buf.chunk()[aligned_offset..]
                     };
+
+                    let mut current_offset = 0;
 
                     #( #decode_fields )*
 
