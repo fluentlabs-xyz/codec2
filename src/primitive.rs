@@ -296,7 +296,7 @@ where
         }
 
         let mut result = [T::default(); N];
-        let elem_size = align_up::<ALIGN>(T::HEADER_SIZE + T::HEADER_SIZE);
+        let elem_size = align_up::<ALIGN>(T::HEADER_SIZE);
 
         for (i, item) in result.iter_mut().enumerate() {
             *item = T::decode(buf, aligned_offset + i * elem_size)?;

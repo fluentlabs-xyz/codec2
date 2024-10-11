@@ -12,7 +12,7 @@ use crate::{
     error::CodecError,
 };
 use alloc::vec;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, FixedBytes, U256};
 use alloy_sol_types::{
     sol,
     sol_data::{self},
@@ -128,12 +128,12 @@ fn test_struct_sol() {
 }
 
 #[derive(Default, Debug, PartialEq)]
+// #[derive(Codec, Default, Debug, PartialEq)]
 struct TestStructSmall {
     bool_val: bool,
     bytes_val: Bytes,
     vec_val: Vec<u32>,
 }
-
 // Recursive expansion of Codec macro
 // ===================================
 
@@ -147,36 +147,56 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { true }> for TestStruc
         || <Bytes as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
         || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+        println!("OP simple encode");
         let aligned_offset = align_up::<ALIGN>(offset);
-        let mut dynamic_fields_count = 0;
-        let mut dynamic_fields_header_size = 0;
         let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+        let aligned_header_size =
+            0 + if <bool as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+                32
+            } else {
+                align_up::<ALIGN>(<bool as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+            } + if <Bytes as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+                32
+            } else {
+                align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+            } + if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+                32
+            } else {
+                align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+            };
 
-        // Create a new BytesMut for temporary storage
-        let mut tmp = BytesMut::new();
-
-        let cur_len = buf.len();
-
-        // Write the dynamic struct offset if necessary
+        println!("aligned header size: {:?}", aligned_header_size);
+        let mut dynamic_fields_count = 0;
         if is_dynamic {
-            write_u32_aligned::<B, ALIGN>(buf, aligned_offset, (cur_len + 32) as u32);
+            let buf_len = buf.len();
+            let offset = if buf_len == 0 { 32 } else { buf_len };
+            write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
         }
-
-        let mut current_offset = 0; // Start at 0 for tmp buffer
-
-        // ENCODE STATIC FIELDS, CALCULATE DYNAMIC FIELDS COUNT
-        if !<bool as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+        let mut tmp = BytesMut::zeroed(aligned_header_size);
+        let mut current_offset = 0;
+        if <bool as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+            <bool as Encoder<B, ALIGN, { true }>>::encode(
+                &self.bool_val,
+                &mut tmp,
+                current_offset,
+            )?;
+            current_offset += align_up::<ALIGN>(4);
+        } else {
             <bool as Encoder<B, ALIGN, { true }>>::encode(
                 &self.bool_val,
                 &mut tmp,
                 current_offset,
             )?;
             current_offset += align_up::<ALIGN>(<bool as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-        } else {
-            dynamic_fields_count += 1;
-            dynamic_fields_header_size += <bool as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
         }
-        if !<Bytes as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+        if <Bytes as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+            <Bytes as Encoder<B, ALIGN, { true }>>::encode(
+                &self.bytes_val,
+                &mut tmp,
+                current_offset,
+            )?;
+            current_offset += align_up::<ALIGN>(4);
+        } else {
             <Bytes as Encoder<B, ALIGN, { true }>>::encode(
                 &self.bytes_val,
                 &mut tmp,
@@ -184,11 +204,15 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { true }> for TestStruc
             )?;
             current_offset +=
                 align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-        } else {
-            dynamic_fields_count += 1;
-            dynamic_fields_header_size += <Bytes as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
         }
-        if !<Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+        if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+            <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
+                &self.vec_val,
+                &mut tmp,
+                current_offset,
+            )?;
+            current_offset += align_up::<ALIGN>(4);
+        } else {
             <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
                 &self.vec_val,
                 &mut tmp,
@@ -196,62 +220,31 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { true }> for TestStruc
             )?;
             current_offset +=
                 align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-        } else {
-            dynamic_fields_count += 1;
-            dynamic_fields_header_size += <Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
         }
-
-        // ENCODE DYNAMIC FIELDS
-        if dynamic_fields_count > 0 {
-            if tmp.len() < current_offset + dynamic_fields_count * 32 {
-                tmp.resize(current_offset + dynamic_fields_count * 32, 0);
-            }
-
-            if <bool as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-                <bool as Encoder<B, ALIGN, { true }>>::encode(
-                    &self.bool_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<bool as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-            }
-            if <Bytes as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-                <Bytes as Encoder<B, ALIGN, { true }>>::encode(
-                    &self.bytes_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-            }
-            if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-                <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
-                    &self.vec_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-            }
-        }
-
-        // Append the temporary buffer to the main buffer
         buf.extend_from_slice(&tmp);
-
         Ok(())
     }
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+        println!("OP simple decode");
         let mut current_offset = align_up::<ALIGN>(offset);
+        println!("current offset: {:?}", current_offset);
+        println!("buf.len(): {:?}", buf.chunk().len());
         let mut tmp = if false
             || <bool as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
             || <Bytes as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
             || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
         {
-            &buf.chunk()[32..]
+            let offset = read_u32_aligned::<B, ALIGN>(&buf.chunk(), current_offset)? as usize;
+            if offset == 32 {
+                &buf.chunk()[32..]
+            } else {
+                &buf.chunk()[offset..]
+            }
         } else {
             buf.chunk()
         };
+        print_bytes::<B, ALIGN>(&tmp.chunk()[..]);
+
         let bool_val = if <bool as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
             <bool as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
         } else {
@@ -291,9 +284,37 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestStru
         || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC;
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        let mut current_offset = aligned_offset;
-        let mut tmp = BytesMut::new();
-        if !<bool as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+        let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+        let aligned_header_size =
+            0 + if <bool as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+                32
+            } else {
+                align_up::<ALIGN>(<bool as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
+            } + if <Bytes as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+                32
+            } else {
+                align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
+            } + if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+                32
+            } else {
+                align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
+            };
+        let mut dynamic_fields_count = 0;
+        if is_dynamic {
+            let buf_len = buf.len();
+            let offset = if buf_len == 0 { 32 } else { buf_len };
+            write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
+        }
+        let mut tmp = BytesMut::zeroed(aligned_header_size);
+        let mut current_offset = 0;
+        if <bool as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+            <bool as Encoder<B, ALIGN, { false }>>::encode(
+                &self.bool_val,
+                &mut tmp,
+                current_offset,
+            )?;
+            current_offset += align_up::<ALIGN>(4);
+        } else {
             <bool as Encoder<B, ALIGN, { false }>>::encode(
                 &self.bool_val,
                 &mut tmp,
@@ -302,7 +323,14 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestStru
             current_offset +=
                 align_up::<ALIGN>(<bool as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
         }
-        if !<Bytes as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+        if <Bytes as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+            <Bytes as Encoder<B, ALIGN, { false }>>::encode(
+                &self.bytes_val,
+                &mut tmp,
+                current_offset,
+            )?;
+            current_offset += align_up::<ALIGN>(4);
+        } else {
             <Bytes as Encoder<B, ALIGN, { false }>>::encode(
                 &self.bytes_val,
                 &mut tmp,
@@ -311,7 +339,14 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestStru
             current_offset +=
                 align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
         }
-        if !<Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+        if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+            <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
+                &self.vec_val,
+                &mut tmp,
+                current_offset,
+            )?;
+            current_offset += align_up::<ALIGN>(4);
+        } else {
             <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
                 &self.vec_val,
                 &mut tmp,
@@ -319,50 +354,6 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestStru
             )?;
             current_offset +=
                 align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-        }
-        if false
-            || <bool as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-            || <Bytes as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-            || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-        {
-            let dynamic_fields_header_size = 0
-                + (<bool as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC as usize
-                    * <bool as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
-                + (<Bytes as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC as usize
-                    * <Bytes as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
-                + (<Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC as usize
-                    * <Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-            if tmp.len() < current_offset + dynamic_fields_header_size {
-                tmp.resize(current_offset + dynamic_fields_header_size, 0);
-            }
-            if <bool as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-                <bool as Encoder<B, ALIGN, { false }>>::encode(
-                    &self.bool_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<bool as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-            }
-            if <Bytes as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-                <Bytes as Encoder<B, ALIGN, { false }>>::encode(
-                    &self.bytes_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<Bytes as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-            }
-            if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-                <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
-                    &self.vec_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-            }
-            write_u32_aligned::<B, ALIGN>(buf, aligned_offset, 32);
         }
         buf.extend_from_slice(&tmp);
         Ok(())
@@ -408,235 +399,8 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestStru
     }
 }
 
-// #[derive(Default, Debug, PartialEq)]
-#[derive(Default, Debug, PartialEq)]
-struct TestNestedStruct {
-    nested_struct: TestStructSmall,
-    vec_val: Vec<u32>,
-}
-
-// Recursive expansion of Codec macro
-// ===================================
-
-impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { true }> for TestNestedStruct {
-    const HEADER_SIZE: usize = 0
-        + <TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE
-        + <Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
-    const IS_DYNAMIC: bool = false
-        || <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
-        || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
-
-    fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let mut dynamic_fields_count = 0;
-        let mut dynamic_fields_header_size = 0;
-        let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
-
-        // Create a new BytesMut for temporary storage
-        let mut tmp = BytesMut::new();
-
-        let cur_len = buf.len();
-
-        // Write the dynamic struct offset if necessary
-        if is_dynamic {
-            write_u32_aligned::<B, ALIGN>(buf, aligned_offset, (cur_len + 32) as u32);
-        }
-
-        let mut current_offset = 0; // Start at 0 for tmp buffer
-
-        // ENCODE STATIC FIELDS, CALCULATE DYNAMIC FIELDS COUNT
-        if !<TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-            <TestStructSmall as Encoder<B, ALIGN, { true }>>::encode(
-                &self.nested_struct,
-                &mut tmp,
-                current_offset,
-            )?;
-            current_offset +=
-                align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-        } else {
-            dynamic_fields_count += 1;
-            dynamic_fields_header_size +=
-                <TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
-        }
-        if !<Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-            <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
-                &self.vec_val,
-                &mut tmp,
-                current_offset,
-            )?;
-            current_offset +=
-                align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-        } else {
-            dynamic_fields_count += 1;
-            dynamic_fields_header_size += <Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
-        }
-
-        // ENCODE DYNAMIC FIELDS
-        if dynamic_fields_count > 0 {
-            if tmp.len() < current_offset + dynamic_fields_count * 32 {
-                tmp.resize(current_offset + dynamic_fields_count * 32, 0);
-            }
-
-            if <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-                <TestStructSmall as Encoder<B, ALIGN, { true }>>::encode(
-                    &self.nested_struct,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset += align_up::<ALIGN>(
-                    <TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE,
-                );
-            }
-            if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-                <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
-                    &self.vec_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-            }
-        }
-
-        // Append the temporary buffer to the main buffer
-        buf.extend_from_slice(&tmp);
-
-        Ok(())
-    }
-
-    fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let mut current_offset = align_up::<ALIGN>(offset);
-        let mut tmp = if false
-            || <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
-            || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
-        {
-            &buf.chunk()[32..]
-        } else {
-            buf.chunk()
-        };
-        let nested_struct = if <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-            <TestStructSmall as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
-        } else {
-            <TestStructSmall as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
-        };
-        current_offset +=
-            align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-        let vec_val = if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
-            <Vec<u32> as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
-        } else {
-            <Vec<u32> as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
-        };
-        current_offset += align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
-        Ok(TestNestedStruct {
-            nested_struct,
-            vec_val,
-        })
-    }
-    fn partial_decode(buffer: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        Ok((0, 0))
-    }
-}
-impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestNestedStruct {
-    const HEADER_SIZE: usize = 0
-        + <TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE
-        + <Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE;
-    const IS_DYNAMIC: bool = false
-        || <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-        || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC;
-    fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let mut current_offset = aligned_offset;
-        let mut tmp = BytesMut::new();
-        if !<TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-            <TestStructSmall as Encoder<B, ALIGN, { false }>>::encode(
-                &self.nested_struct,
-                &mut tmp,
-                current_offset,
-            )?;
-            current_offset +=
-                align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-        }
-        if !<Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-            <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
-                &self.vec_val,
-                &mut tmp,
-                current_offset,
-            )?;
-            current_offset +=
-                align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-        }
-        if false
-            || <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-            || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-        {
-            let dynamic_fields_header_size = 0
-                + (<TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC as usize
-                    * <TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
-                + (<Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC as usize
-                    * <Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-            if tmp.len() < current_offset + dynamic_fields_header_size {
-                tmp.resize(current_offset + dynamic_fields_header_size, 0);
-            }
-            if <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-                <TestStructSmall as Encoder<B, ALIGN, { false }>>::encode(
-                    &self.nested_struct,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset += align_up::<ALIGN>(
-                    <TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE,
-                );
-            }
-            if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-                <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
-                    &self.vec_val,
-                    &mut tmp,
-                    current_offset,
-                )?;
-                current_offset +=
-                    align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-            }
-            write_u32_aligned::<B, ALIGN>(buf, aligned_offset, 32);
-        }
-        buf.extend_from_slice(&tmp);
-        Ok(())
-    }
-    fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let mut current_offset = align_up::<ALIGN>(offset);
-        let mut tmp = if false
-            || <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-            || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
-        {
-            &buf.chunk()[32..]
-        } else {
-            buf.chunk()
-        };
-        let nested_struct = if <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-            <TestStructSmall as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
-        } else {
-            <TestStructSmall as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
-        };
-        current_offset +=
-            align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-        let vec_val = if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
-            <Vec<u32> as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
-        } else {
-            <Vec<u32> as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
-        };
-        current_offset +=
-            align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
-        Ok(TestNestedStruct {
-            nested_struct,
-            vec_val,
-        })
-    }
-    fn partial_decode(buffer: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        Ok((0, 0))
-    }
-}
-
 #[test]
-fn test_small_struct_sol() {
+fn test_struct_small_sol() {
     // Create equivalent structures in alloy_sol_types
     sol! {
         struct TestStructSmallSol {
@@ -686,6 +450,695 @@ fn test_small_struct_sol() {
     assert_eq!(decoded, test_struct, "Decoding mismatch");
 }
 
+// #[derive(Default, Debug, PartialEq)]
+#[derive(Codec, Default, Debug, PartialEq)]
+struct TestNestedStruct {
+    nested_struct: TestStructSmall,
+    fixed_bytes: [FixedBytes<32>; 2],
+    uint_val: u32,
+    vec_val: Vec<u32>,
+}
+
+// // Recursive expansion of Codec macro
+// // ===================================
+
+// impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { true }> for TestNestedStruct {
+//     const HEADER_SIZE: usize = 0
+//         + <TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE
+//         + <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::HEADER_SIZE
+//         + <u32 as Encoder<B, ALIGN, { true }>>::HEADER_SIZE
+//         + <Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
+//     const IS_DYNAMIC: bool = false
+//         || <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         || <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+//     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+//         let aligned_offset = align_up::<ALIGN>(offset);
+//         let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+//         let aligned_header_size =
+//             0 + if <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+//             } + if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true
+// }>>::HEADER_SIZE)             } + if <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+//             } + if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+//             };
+//         let mut dynamic_fields_count = 0;
+//         if is_dynamic {
+//             let buf_len = buf.len();
+//             let offset = if buf_len == 0 { 32 } else { buf_len };
+//             write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
+//         }
+//         let mut current_offset = 0;
+//         let mut tmp = BytesMut::zeroed(aligned_header_size);
+//         if <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <TestStructSmall as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.nested_struct,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <TestStructSmall as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.nested_struct,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset +=
+//                 align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+//         }
+//         if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.fixed_bytes,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.fixed_bytes,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(
+//                 <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::HEADER_SIZE,
+//             );
+//         }
+//         if <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { true }>>::encode(&self.uint_val, &mut tmp,
+// current_offset)?;             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <u32 as Encoder<B, ALIGN, { true }>>::encode(&self.uint_val, &mut tmp,
+// current_offset)?;             current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, {
+// true }>>::HEADER_SIZE);         }
+//         if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.vec_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.vec_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset +=
+//                 align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+//         }
+//         buf.extend_from_slice(&tmp);
+//         Ok(())
+//     }
+//     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+//         let mut current_offset = align_up::<ALIGN>(offset);
+//         println!(">>current offset: {:?}", current_offset);
+//         let mut tmp = if false
+//             || <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//             || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//             || <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//             || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         {
+//             let offset = read_u32_aligned::<B, ALIGN>(&buf.chunk(), current_offset)? as usize;
+//             if offset == 32 {
+//                 &buf.chunk()[32..]
+//             } else {
+//                 &buf.chunk()[..]
+//             }
+//         } else {
+//             buf.chunk()
+//         };
+//         println!("11111");
+//         print_bytes::<B, ALIGN>(&tmp.chunk()[..]);
+//         let nested_struct =
+//             <TestStructSmall as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?;
+//         current_offset += if <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             align_up::<ALIGN>(4)
+//         } else {
+//             align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+//         };
+
+//         println!("22222");
+//         println!("current offset: {:?}", current_offset);
+//         print_bytes::<B, ALIGN>(&tmp.chunk()[..]);
+//         let fixed_bytes =
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::decode(&mut tmp,
+// current_offset)?;
+
+//         current_offset += if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             align_up::<ALIGN>(4)
+//         } else {
+//             align_up::<ALIGN>(<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::HEADER_SIZE)
+//         };
+
+//         println!("33333");
+//         println!("current offset: {:?}", current_offset);
+//         // current_offset +=
+//         //     align_up::<ALIGN>(<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true
+// }>>::HEADER_SIZE);         let uint_val = if <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <u32 as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+//         let vec_val = if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <Vec<u32> as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <Vec<u32> as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset += align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true
+// }>>::HEADER_SIZE);
+
+//         Ok(TestNestedStruct {
+//             nested_struct,
+//             fixed_bytes,
+//             uint_val,
+//             vec_val,
+//         })
+//     }
+//     fn partial_decode(buffer: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+//         Ok((0, 0))
+//     }
+// }
+// impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestNestedStruct {
+//     const HEADER_SIZE: usize = 0
+//         + <TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE
+//         + <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::HEADER_SIZE
+//         + <u32 as Encoder<B, ALIGN, { false }>>::HEADER_SIZE
+//         + <Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE;
+//     const IS_DYNAMIC: bool = false
+//         || <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         || <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC;
+//     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+//         let aligned_offset = align_up::<ALIGN>(offset);
+//         let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+//         let aligned_header_size =
+//             0 + if <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
+//             } + if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(
+//                     <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::HEADER_SIZE,
+//                 )
+//             } + if <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
+//             } + if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 32
+//             } else {
+//                 align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE)
+//             };
+//         let mut dynamic_fields_count = 0;
+//         if is_dynamic {
+//             let buf_len = buf.len();
+//             let offset = if buf_len == 0 { 32 } else { buf_len };
+//             write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
+//         }
+//         let mut tmp = BytesMut::zeroed(aligned_header_size);
+//         let mut current_offset = 0;
+//         if <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <TestStructSmall as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.nested_struct,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <TestStructSmall as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.nested_struct,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset +=
+//                 align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { false
+// }>>::HEADER_SIZE);         }
+//         if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.fixed_bytes,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.fixed_bytes,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(
+//                 <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::HEADER_SIZE,
+//             );
+//         }
+//         if <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.uint_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <u32 as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.uint_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { false
+// }>>::HEADER_SIZE);         }
+//         if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.vec_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(4);
+//         } else {
+//             <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.vec_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset +=
+//                 align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         }
+//         buf.extend_from_slice(&tmp);
+//         Ok(())
+//     }
+//     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+//         let mut current_offset = align_up::<ALIGN>(offset);
+
+//         let mut tmp = if false
+//             || <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//             || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//             || <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//             || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         {
+//             &buf.chunk()[32..]
+//         } else {
+//             buf.chunk()
+//         };
+//         print_bytes::<B, ALIGN>(&tmp);
+//         let nested_struct = if <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             println!("current_offset: {:?}", current_offset);
+//             <TestStructSmall as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <TestStructSmall as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset +=
+//             align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         let fixed_bytes = if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::decode(&mut tmp,
+// current_offset)?         } else {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::decode(&mut tmp,
+// current_offset)?         };
+//         current_offset +=
+//             align_up::<ALIGN>(<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false
+// }>>::HEADER_SIZE);         let uint_val = if <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <u32 as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         let vec_val = if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <Vec<u32> as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <Vec<u32> as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset +=
+//             align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         Ok(TestNestedStruct {
+//             nested_struct,
+//             fixed_bytes,
+//             uint_val,
+//             vec_val,
+//         })
+//     }
+//     fn partial_decode(buffer: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+//         Ok((0, 0))
+//     }
+// }
+
+// // Recursive expansion of Codec macro
+// ===================================
+// real header size
+// 32 - for dynamic structs is always 32
+// 64 - for static types it's aligned header size
+// 32 - u32
+// 32 - vec<u32>
+
+impl TestNestedStruct {
+    fn header_size<B: ByteOrder, const ALIGN: usize>(&self) -> usize {
+        let mut header_size = 0;
+        if <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+            header_size += 32;
+        } else {
+            header_size +=
+                align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+        }
+
+        if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+            header_size += 32;
+        } else {
+            header_size += align_up::<ALIGN>(
+                <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::HEADER_SIZE,
+            );
+        }
+
+        if <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+            header_size += 32;
+        } else {
+            header_size += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+        }
+
+        if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+            header_size += 32;
+        } else {
+            header_size +=
+                align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+        }
+
+        header_size
+    }
+}
+// impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { true }> for TestNestedStruct {
+//     const HEADER_SIZE: usize = 0
+//         + <TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE
+//         + <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::HEADER_SIZE
+//         + <u32 as Encoder<B, ALIGN, { true }>>::HEADER_SIZE
+//         + <Vec<u32> as Encoder<B, ALIGN, { true }>>::HEADER_SIZE;
+//     const IS_DYNAMIC: bool = false
+//         || <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         || <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+//     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+//         let aligned_offset = align_up::<ALIGN>(offset);
+//         let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+//         let mut dynamic_fields_count = 0;
+
+//         let aligned_header_size = self.header_size::<B, ALIGN>();
+//         println!(">>>aligned_header_size: {:?};", aligned_header_size);
+//         if is_dynamic {
+//             let buf_len = buf.len();
+//             let offset = if buf_len == 0 { 32 } else { buf_len };
+//             write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
+//         }
+
+//         let mut current_offset = 0;
+//         // let mut dynamic_fields_offset = aligned_header_size;
+//         let mut tmp = BytesMut::zeroed(aligned_header_size);
+
+//         if !<TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             // write as is
+//             <TestStructSmall as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.nested_struct,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset +=
+//                 align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+//         } else {
+//             <TestStructSmall as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.nested_struct,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += 32;
+//         }
+
+//         if !<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.fixed_bytes,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(
+//                 <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::HEADER_SIZE,
+//             );
+//         } else {
+//             dynamic_fields_count += 1;
+//         }
+//         if !<u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { true }>>::encode(&self.uint_val, &mut tmp,
+// current_offset)?;             current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, {
+// true }>>::HEADER_SIZE);         } else {
+//             dynamic_fields_count += 1;
+//         }
+//         if !<Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.vec_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += 32;
+//         } else {
+//             <Vec<u32> as Encoder<B, ALIGN, { true }>>::encode(
+//                 &self.vec_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += 32;
+//         }
+
+//         buf.extend_from_slice(&tmp);
+//         Ok(())
+//     }
+//     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+//         let mut current_offset = align_up::<ALIGN>(offset);
+//         let mut tmp = if false
+//             || <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//             || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//             || <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//             || <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC
+//         {
+//             &buf.chunk()[32..]
+//         } else {
+//             buf.chunk()
+//         };
+//         println!(">>>CURRENT");
+//         print_bytes::<BE, 32>(&tmp);
+//         let nested_struct = if <TestStructSmall as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             let val =
+//                 <TestStructSmall as Encoder<B, ALIGN, { true }>>::decode(&mut tmp,
+// current_offset);             current_offset += 32;
+//             val?
+//         } else {
+//             let val =
+//                 <TestStructSmall as Encoder<B, ALIGN, { true }>>::decode(&mut tmp,
+// current_offset);             current_offset += 32;
+//             val?
+//         };
+//         let fixed_bytes = if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::decode(&mut tmp,
+// current_offset)?         } else {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::decode(&mut tmp,
+// current_offset)?         };
+//         current_offset +=
+//             align_up::<ALIGN>(<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+//         let uint_val = if <u32 as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <u32 as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { true }>>::HEADER_SIZE);
+//         let vec_val = if <Vec<u32> as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC {
+//             let val = <Vec<u32> as Encoder<B, ALIGN, { true }>>::decode(&mut tmp,
+// current_offset);             val?
+//         } else {
+//             <Vec<u32> as Encoder<B, ALIGN, { true }>>::decode(&mut tmp, current_offset)?
+//         };
+//         // current_offset += align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { true
+//         // }>>::HEADER_SIZE);
+//         Ok(TestNestedStruct {
+//             nested_struct,
+//             fixed_bytes,
+//             uint_val,
+//             vec_val,
+//         })
+//     }
+//     fn partial_decode(buffer: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+//         Ok((0, 0))
+//     }
+// }
+// impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, { false }> for TestNestedStruct {
+//     const HEADER_SIZE: usize = 0
+//         + <TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE
+//         + <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::HEADER_SIZE
+//         + <u32 as Encoder<B, ALIGN, { false }>>::HEADER_SIZE
+//         + <Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE;
+//     const IS_DYNAMIC: bool = false
+//         || <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         || <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC;
+//     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+//         let aligned_offset = align_up::<ALIGN>(offset);
+//         let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+//         let mut dynamic_fields_count = 0;
+//         if is_dynamic {
+//             let buf_len = buf.len();
+//             let offset = if buf_len == 0 { 32 } else { buf_len };
+//             write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
+//         }
+//         let mut tmp = BytesMut::new();
+//         let mut current_offset = 0;
+//         if !<TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <TestStructSmall as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.nested_struct,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset +=
+//                 align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { false
+// }>>::HEADER_SIZE);         } else {
+//             dynamic_fields_count += 1;
+//         }
+//         if !<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.fixed_bytes,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(
+//                 <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::HEADER_SIZE,
+//             );
+//         } else {
+//             dynamic_fields_count += 1;
+//         }
+//         if !<u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.uint_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { false
+// }>>::HEADER_SIZE);         } else {
+//             dynamic_fields_count += 1;
+//         }
+//         if !<Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
+//                 &self.vec_val,
+//                 &mut tmp,
+//                 current_offset,
+//             )?;
+//             current_offset +=
+//                 align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         } else {
+//             dynamic_fields_count += 1;
+//         }
+//         if dynamic_fields_count > 0 {
+//             if tmp.len() < current_offset + dynamic_fields_count * 32 {
+//                 tmp.resize(current_offset + dynamic_fields_count * 32, 0);
+//             }
+//             if <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 <TestStructSmall as Encoder<B, ALIGN, { false }>>::encode(
+//                     &self.nested_struct,
+//                     &mut tmp,
+//                     current_offset,
+//                 )?;
+//                 current_offset += align_up::<ALIGN>(
+//                     <TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE,
+//                 );
+//             }
+//             if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::encode(
+//                     &self.fixed_bytes,
+//                     &mut tmp,
+//                     current_offset,
+//                 )?;
+//                 current_offset += align_up::<ALIGN>(
+//                     <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::HEADER_SIZE,
+//                 );
+//             }
+//             if <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 <u32 as Encoder<B, ALIGN, { false }>>::encode(
+//                     &self.uint_val,
+//                     &mut tmp,
+//                     current_offset,
+//                 )?;
+//                 current_offset +=
+//                     align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//             }
+//             if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//                 <Vec<u32> as Encoder<B, ALIGN, { false }>>::encode(
+//                     &self.vec_val,
+//                     &mut tmp,
+//                     current_offset,
+//                 )?;
+//                 current_offset +=
+//                     align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//             }
+//         }
+//         buf.extend_from_slice(&tmp);
+//         Ok(())
+//     }
+//     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+//         let mut current_offset = align_up::<ALIGN>(offset);
+//         let mut tmp = if false
+//             || <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//             || <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//             || <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//             || <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC
+//         {
+//             &buf.chunk()[32..]
+//         } else {
+//             buf.chunk()
+//         };
+//         let nested_struct = if <TestStructSmall as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <TestStructSmall as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <TestStructSmall as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset +=
+//             align_up::<ALIGN>(<TestStructSmall as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         let fixed_bytes = if <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::decode(&mut tmp,
+// current_offset)?         } else {
+//             <[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false }>>::decode(&mut tmp,
+// current_offset)?         };
+//         current_offset +=
+//             align_up::<ALIGN>(<[FixedBytes<32>; 2] as Encoder<B, ALIGN, { false
+// }>>::HEADER_SIZE);         let uint_val = if <u32 as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <u32 as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <u32 as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset += align_up::<ALIGN>(<u32 as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         let vec_val = if <Vec<u32> as Encoder<B, ALIGN, { false }>>::IS_DYNAMIC {
+//             <Vec<u32> as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         } else {
+//             <Vec<u32> as Encoder<B, ALIGN, { false }>>::decode(&mut tmp, current_offset)?
+//         };
+//         current_offset +=
+//             align_up::<ALIGN>(<Vec<u32> as Encoder<B, ALIGN, { false }>>::HEADER_SIZE);
+//         Ok(TestNestedStruct {
+//             nested_struct,
+//             fixed_bytes,
+//             uint_val,
+//             vec_val,
+//         })
+//     }
+//     fn partial_decode(buffer: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+//         Ok((0, 0))
+//     }
+// }
+
 #[test]
 fn test_nested_struct_sol() {
     // Create equivalent structures in alloy_sol_types
@@ -698,6 +1151,8 @@ fn test_nested_struct_sol() {
 
         struct TestNestedStructSol {
             TestStructSmallSol nested_struct;
+            bytes32[2] fixed_bytes;
+            uint32 uint_val;
             uint32[] vec_val;
         }
     }
@@ -710,6 +1165,11 @@ fn test_nested_struct_sol() {
 
     let test_nested_struct_sol = TestNestedStructSol {
         nested_struct: test_struct_sol,
+        fixed_bytes: [
+            FixedBytes::<32>::from_slice(&[0x11; 32]),
+            FixedBytes::<32>::from_slice(&[0x11; 32]),
+        ],
+        uint_val: 42,
         vec_val: vec![100, 200, 300],
     };
 
@@ -728,6 +1188,11 @@ fn test_nested_struct_sol() {
     // Create an instance of TestNestedStruct
     let test_nested_struct = TestNestedStruct {
         nested_struct: test_struct,
+        fixed_bytes: [
+            FixedBytes::<32>::from_slice(&[0x11; 32]),
+            FixedBytes::<32>::from_slice(&[0x11; 32]),
+        ],
+        uint_val: 42,
         vec_val: vec![100, 200, 300],
     };
 
@@ -740,16 +1205,18 @@ fn test_nested_struct_sol() {
     println!("{:?}", hex::encode(&encoded));
     print_bytes::<BE, 32>(&encoded);
 
-    // // Compare the results
-    // assert_eq!(
-    //     hex::encode(&encoded),
-    //     hex::encode(alloy_encoded),
-    //     "Encoding mismatch between our Encoder and alloy_sol_types"
-    // );
+    // Compare the results
+    assert_eq!(
+        hex::encode(&encoded),
+        hex::encode(alloy_encoded),
+        "Encoding mismatch between our Encoder and alloy_sol_types"
+    );
 
-    // // Test decoding
-    // let decoded = SolidityABI::<TestNestedStruct>::decode(&encoded, 0).unwrap();
-    // assert_eq!(decoded, test_nested_struct, "Decoding mismatch");
+    println!("Decoding...");
+
+    // Test decoding
+    let decoded = SolidityABI::<TestNestedStruct>::decode(&encoded, 0).unwrap();
+    assert_eq!(decoded, test_nested_struct, "Decoding mismatch");
 }
 #[test]
 fn test_fixed_sol() {
