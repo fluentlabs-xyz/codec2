@@ -78,6 +78,14 @@ impl CodecStruct {
             }
         })
     }
+    fn generate_dynamic_fields_header_size(&self, sol_mode: bool) -> TokenStream {
+        self.fields.iter().fold(quote!(0), |acc, field| {
+            let ty = &field.ty;
+            quote! {
+                #acc + (<#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC as usize  * <#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE)
+            }
+        })
+    }
 
     fn encode_dynamic(&self, sol_mode: bool) -> TokenStream {
         let encode_dynamic_fields = self.fields.iter().map(|field| {
@@ -187,6 +195,7 @@ impl CodecStruct {
         });
 
         let dynamic_fields_count = self.generate_dynamic_fields_count(sol_mode);
+        let dynamic_fields_header_size = self.generate_dynamic_fields_header_size(sol_mode);
 
         let struct_initialization = self.fields.iter().map(|field| {
             let ident = &field.ident;
@@ -210,10 +219,10 @@ impl CodecStruct {
 
                         // Encode dynamic fields
                         if #is_dynamic {
-                            let dynamic_fields_count = (#dynamic_fields_count) * 32;
+                            let dynamic_fields_header_size = #dynamic_fields_header_size;
 
-                            if tmp.len() < current_offset + dynamic_fields_count {
-                                tmp.resize(current_offset + dynamic_fields_count, 0);
+                            if tmp.len() < current_offset + dynamic_fields_header_size {
+                                tmp.resize(current_offset + dynamic_fields_header_size, 0);
                             }
                             #encode_dynamic_fields
                             // Write dynamic struct offset
