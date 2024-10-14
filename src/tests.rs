@@ -5,8 +5,8 @@ use crate::{
         read_u32_aligned,
         write_u32_aligned,
         Encoder,
+        FluentABI,
         SolidityABI,
-        WasmABI,
     },
     error::CodecError,
 };
@@ -272,13 +272,13 @@ fn test_struct_wasm() {
     };
 
     let mut buf = BytesMut::new();
-    WasmABI::encode(&test_struct, &mut buf, 0).unwrap();
+    FluentABI::encode(&test_struct, &mut buf, 0).unwrap();
 
     let encoded = buf.freeze();
 
     println!("encoded: {:?}", hex::encode(&encoded));
 
-    let decoded = WasmABI::<TestStruct2>::decode(&encoded, 0).unwrap();
+    let decoded = FluentABI::<TestStruct2>::decode(&encoded, 0).unwrap();
 
     assert_eq!(decoded, test_struct);
 }
@@ -457,7 +457,7 @@ fn test_vec_sol_nested() {
 fn test_vec_wasm_nested() {
     let original: Vec<Vec<u32>> = vec![vec![1u32, 2, 3], vec![4, 5], vec![6, 7, 8, 9, 10]];
     let mut buf = BytesMut::new();
-    WasmABI::<Vec<Vec<u32>>>::encode(&original, &mut buf, 0).unwrap();
+    FluentABI::<Vec<Vec<u32>>>::encode(&original, &mut buf, 0).unwrap();
     let encoded = buf.freeze();
 
     println!("Encoded Vec: {:?}", hex::encode(&encoded));
@@ -466,7 +466,7 @@ fn test_vec_wasm_nested() {
 
     assert_eq!(encoded.to_vec(), expected_encoded);
 
-    let decoded = WasmABI::<Vec<Vec<u32>>>::decode(&&encoded[..], 0).unwrap();
+    let decoded = FluentABI::<Vec<Vec<u32>>>::decode(&&encoded[..], 0).unwrap();
 
     assert_eq!(decoded, original);
 }
@@ -529,13 +529,13 @@ fn test_vec_partial_decoding_sol() {
 fn test_vec_partial_decoding_wasm() {
     let original: Vec<u32> = vec![1u32, 2, 3, 4, 5];
     let mut buf = BytesMut::new();
-    WasmABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
+    FluentABI::<Vec<u32>>::encode(&original, &mut buf, 0).unwrap();
     let encoded = buf.freeze();
 
     println!("Encoded Vec: {:?}", hex::encode(&encoded));
 
     // offset, length
-    let decoded_header = WasmABI::<Vec<u32>>::partial_decode(&&encoded[..], 4).unwrap();
+    let decoded_header = FluentABI::<Vec<u32>>::partial_decode(&&encoded[..], 4).unwrap();
     assert_eq!(decoded_header, (12, 20));
     assert_eq!(encoded.chunk()[12..20], vec![1, 0, 0, 0, 2, 0, 0, 0]);
 }
@@ -621,7 +621,7 @@ fn test_map_wasm_simple() {
     original.insert(1000, 60);
 
     let mut buf = BytesMut::new();
-    WasmABI::encode(&original, &mut buf, 0).unwrap();
+    FluentABI::encode(&original, &mut buf, 0).unwrap();
 
     let encoded = buf.freeze();
 
@@ -633,7 +633,7 @@ fn test_map_wasm_simple() {
 
     println!("Encoded Map: {:?}", hex::encode(&encoded));
 
-    let decoded = WasmABI::<HashMap<u32, u32>>::decode(&&encoded[..], 0).unwrap();
+    let decoded = FluentABI::<HashMap<u32, u32>>::decode(&&encoded[..], 0).unwrap();
 
     assert_eq!(decoded, original);
 }
@@ -645,7 +645,7 @@ fn test_map_wasm_nested() {
     original.insert(2, HashMap::from([(7, 8)]));
 
     let mut buf = BytesMut::new();
-    WasmABI::encode(&original, &mut buf, 0).unwrap();
+    FluentABI::encode(&original, &mut buf, 0).unwrap();
 
     let encoded = buf.freeze();
     let expected_encoded =
@@ -655,7 +655,7 @@ fn test_map_wasm_nested() {
 
     print_bytes::<LE, 4>(&encoded.chunk());
 
-    let decoded = WasmABI::<HashMap<u32, HashMap<u32, u32>>>::decode(&&encoded[..], 0).unwrap();
+    let decoded = FluentABI::<HashMap<u32, HashMap<u32, u32>>>::decode(&&encoded[..], 0).unwrap();
 
     assert_eq!(decoded, original);
 }

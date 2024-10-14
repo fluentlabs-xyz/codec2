@@ -90,7 +90,7 @@ macro_rules! define_encoder_mode {
 
 // Define encoder modes for Solidity and Wasm ABI
 define_encoder_mode!(SolidityABI, BE, 32, true);
-define_encoder_mode!(WasmABI, LE, 4, false);
+define_encoder_mode!(FluentABI, LE, 4, false);
 // TODO: move functions bellow to the utils module
 
 // TODO: d1r1 is it possible to make this fn const?

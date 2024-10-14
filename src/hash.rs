@@ -517,7 +517,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        encoder::{SolidityABI, WasmABI},
+        encoder::{FluentABI, SolidityABI},
         tests::print_bytes,
     };
     use alloc::vec::Vec;
@@ -533,18 +533,18 @@ mod tests {
         values.insert(1000, HashMap::from([(7, 8), (9, 4)]));
 
         let mut buf = BytesMut::new();
-        WasmABI::encode(&values, &mut buf, 0).unwrap();
+        FluentABI::encode(&values, &mut buf, 0).unwrap();
 
         let encoded = buf.freeze();
         let expected_encoded = "03000000140000000c000000200000005c0000000300000064000000e8030000000000003c000000000000003c00000000000000020000003c000000080000004400000008000000020000004c0000000800000054000000080000000100000003000000020000000400000007000000090000000800000004000000";
 
         assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
 
-        let decoded = WasmABI::<HashMap<i32, HashMap<i32, i32>>>::decode(&encoded, 0).unwrap();
+        let decoded = FluentABI::<HashMap<i32, HashMap<i32, i32>>>::decode(&encoded, 0).unwrap();
         assert_eq!(values, decoded);
 
         let header =
-            WasmABI::<HashMap<i32, HashMap<i32, i32>>>::partial_decode(&encoded, 0).unwrap();
+            FluentABI::<HashMap<i32, HashMap<i32, i32>>>::partial_decode(&encoded, 0).unwrap();
 
         assert_eq!(header, (20, 104));
         println!("Header: {:?}", header);
@@ -559,7 +559,7 @@ mod tests {
         ];
 
         let mut buf = BytesMut::new();
-        WasmABI::encode(&values, &mut buf, 0).unwrap();
+        FluentABI::encode(&values, &mut buf, 0).unwrap();
 
         let result = buf.freeze();
         println!("{}", hex::encode(&result));
@@ -568,7 +568,7 @@ mod tests {
 
         assert_eq!(hex::encode(&result), expected_encoded, "Encoding mismatch");
         let bytes = result.clone();
-        let values2 = WasmABI::<Vec<HashMap<u32, u32>>>::decode(&bytes, 0).unwrap();
+        let values2 = FluentABI::<Vec<HashMap<u32, u32>>>::decode(&bytes, 0).unwrap();
         assert_eq!(values, values2);
     }
 
@@ -580,7 +580,7 @@ mod tests {
         values.insert(vec![0, 1, 6], vec![3, 4, 5]);
         let mut buf = BytesMut::new();
 
-        WasmABI::encode(&values, &mut buf, 0).unwrap();
+        FluentABI::encode(&values, &mut buf, 0).unwrap();
         let encoded = buf.freeze();
 
         // Note: The expected encoded string might need to be updated based on the new encoding
@@ -588,7 +588,7 @@ mod tests {
         let expected_encoded = "0300000014000000480000005c0000004800000003000000240000000c00000003000000300000000c000000030000003c0000000c00000000000000010000000200000000000000010000000600000003000000010000000200000003000000240000000c00000003000000300000000c000000030000003c0000000c000000030000000400000005000000030000000400000005000000030000000400000005000000";
         assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
 
-        let values2 = WasmABI::<HashMap<Vec<i32>, Vec<i32>>>::decode(&encoded, 0).unwrap();
+        let values2 = FluentABI::<HashMap<Vec<i32>, Vec<i32>>>::decode(&encoded, 0).unwrap();
         assert_eq!(values, values2);
     }
 
@@ -597,14 +597,14 @@ mod tests {
         let values = HashSet::from([1, 2, 3]);
         let mut buf = BytesMut::new();
 
-        WasmABI::encode(&values, &mut buf, 0).unwrap();
+        FluentABI::encode(&values, &mut buf, 0).unwrap();
         let encoded = buf.freeze();
 
         println!("{}", hex::encode(&encoded));
         let expected_encoded = "030000000c0000000c000000010000000200000003000000";
         assert_eq!(hex::encode(&encoded), expected_encoded, "Encoding mismatch");
 
-        let values2 = WasmABI::<HashSet<i32>>::decode(&encoded, 0).unwrap();
+        let values2 = FluentABI::<HashSet<i32>>::decode(&encoded, 0).unwrap();
         assert_eq!(values, values2);
     }
 
@@ -613,12 +613,12 @@ mod tests {
         let values1 = HashSet::from([1, 2, 3, 4, 5, 6, 7, 8, 9]);
         let mut buf1 = BytesMut::new();
 
-        WasmABI::encode(&values1, &mut buf1, 0).unwrap();
+        FluentABI::encode(&values1, &mut buf1, 0).unwrap();
 
         let values2 = HashSet::from([8, 3, 2, 4, 5, 9, 7, 1, 6]);
         let mut buf2 = BytesMut::new();
 
-        WasmABI::encode(&values2, &mut buf2, 0).unwrap();
+        FluentABI::encode(&values2, &mut buf2, 0).unwrap();
 
         assert_eq!(&buf1.chunk(), &buf2.chunk());
     }
