@@ -4,17 +4,28 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-alloy-primitives = { version = "0.8.0", default-features = false }
-alloy-sol-types = { version = "0.8.3", default-features = false }
+alloy-primitives = { version = "0.8.7", default-features = false }
+alloy-sol-types = { version = "0.8.7", default-features = false }
 byteorder = { version = "1.5.0", default-features = false }
-bytes = { version = "1.7.1", default-features = false }
-hashbrown = { version = "0.14" }
+bytes = { version = "1.7", default-features = false }
+hashbrown = { version = "0.12.1" }
 thiserror = { version = "1.0.63", default-features = false }
 codec-derive = { path = "codec-derive" }
 hex = "0.4.3"
+
+
+
 
 
 [dev-dependencies]
 hex = "0.4.3"
 hex-literal = "0.4.1"
 pretty-hex = "0.4.1"
+fluentbase-codec = { path = "../fluentbase/crates/codec" , features = ["derive"]}
+fluentbase-sdk = { path = "../fluentbase/crates/sdk", features = ["std"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

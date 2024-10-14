@@ -53,109 +53,21 @@ impl CodecStruct {
         }
     }
 
-    fn encode_static(&self, sol_mode: bool) -> TokenStream {
-        let fields = self.fields.iter().map(|field| {
-            let ident = &field.ident;
-            let ty = &field.ty;
-            quote! {
-                if !<#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC {
-                    <#ty as Encoder<B, ALIGN, {#sol_mode}>>::encode(&self.#ident, &mut tmp, current_offset)?;
-                    current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE);
-                } else {
-                    dynamic_fields_count += 1;
-                }
-            }
-        });
-
-        quote! {
-            #( #fields )*
-        }
-    }
-
-    fn encode_dynamic(&self, sol_mode: bool) -> TokenStream {
-        let fields = self.fields.iter().map(|field| {
-            let ident = &field.ident;
-            let ty = &field.ty;
-            quote! {
-                if <#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC {
-                    <#ty as Encoder<B, ALIGN, {#sol_mode}>>::encode(&self.#ident, &mut tmp, current_offset)?;
-                    current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE);
-                }
-            }
-        });
-
-        quote! {
-            #( #fields )*
-        }
-    }
-
-    fn decode_static(&self, sol_mode: bool) -> TokenStream {
-        let fields = self.fields.iter().map(|field| {
-            let ident = &field.ident;
-            let ty = &field.ty;
-            quote! {
-                if !<#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC {
-                    let #ident = <#ty as Encoder<B, ALIGN, {#sol_mode}>>::decode(&mut tmp, current_offset)?;
-                    current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE);
-                }
-            }
-        });
-
-        quote! {
-            #( #fields )*
-        }
-    }
-
-    fn decode_dynamic(&self, sol_mode: bool) -> TokenStream {
-        let fields = self.fields.iter().map(|field| {
-            let ident = &field.ident;
-            let ty = &field.ty;
-            quote! {
-                if <#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC {
-                    <#ty as Encoder<B, ALIGN, {#sol_mode}>>::decode(&mut tmp, current_offset)?;
-                    current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE);
-                }
-            }
-        });
-
-        quote! {
-            #( #fields )*
-        }
-    }
-
-    fn generate_decode(&self, field: &Field, sol_mode: bool) -> TokenStream {
-        let ident = &field.ident;
-        let ty = &field.ty;
-        quote! {
-            let #ident = <#ty as Encoder<B, ALIGN, {#sol_mode}>>::decode(&mut tmp, current_offset)?;
-            current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE);
-        }
-    }
-
-    fn generate_partial_decode(&self, field: &Field, sol_mode: bool) -> TokenStream {
-        let ty = &field.ty;
-        quote! {
-            let (offset, length) = <#ty as Encoder<B, ALIGN, {#sol_mode}>>::partial_decode(buffer, current_offset)?;
-            current_offset += <#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE;
-            total_length += length;
-        }
-    }
-
-    fn generate_impl(&self, sol_mode: bool) -> TokenStream {
+    fn generate_impl_sol(&self) -> TokenStream {
         let struct_name = &self.struct_name;
-        let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+        let (_impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
 
         let header_sizes = self.fields.iter().map(|field| {
             let ty = &field.ty;
             quote! {
-                <#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE
+                <#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE
             }
         });
 
         let is_dynamic_expr = self.fields.iter().map(|field| {
             let ty = &field.ty;
             quote! {
-                <#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC
+                <#ty as Encoder<B, ALIGN, {true}>>::IS_DYNAMIC
             }
         });
 
@@ -163,19 +75,16 @@ impl CodecStruct {
             false #( || #is_dynamic_expr)*
         };
 
-        let encode_static_fields = self.encode_static(sol_mode);
-        let encode_dynamic_fields = self.encode_dynamic(sol_mode);
-
         let encode_fields = self.fields.iter().map(|field| {
             let ident = &field.ident;
             let ty = &field.ty;
             quote! {
-                if <#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC {
-                    <#ty as Encoder<B, ALIGN, {#sol_mode}>>::encode(&self.#ident, &mut tmp, current_offset)?;
+                if <#ty as Encoder<B, ALIGN, {true}>>::IS_DYNAMIC {
+                    <#ty as Encoder<B, ALIGN, {true}>>::encode(&self.#ident, &mut tmp, current_offset)?;
                     current_offset += align_up::<ALIGN>(4);
                 } else {
-                    <#ty as Encoder<B, ALIGN, {#sol_mode}>>::encode(&self.#ident, &mut tmp, current_offset)?;
-                    current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE);
+                    <#ty as Encoder<B, ALIGN, {true}>>::encode(&self.#ident, &mut tmp, current_offset)?;
+                    current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE);
                 }
             }
         });
@@ -184,12 +93,12 @@ impl CodecStruct {
             let ident = &field.ident;
             let ty = &field.ty;
             quote! {
-                let #ident = <#ty as Encoder<B, ALIGN, {#sol_mode}>>::decode(&mut tmp, current_offset)?;
+                let #ident = <#ty as Encoder<B, ALIGN, {true}>>::decode(&mut tmp, current_offset)?;
 
-                current_offset += if <#ty as Encoder<B, ALIGN, {#sol_mode}>>::IS_DYNAMIC {
-                    align_up::<ALIGN>(4)
+                current_offset += if <#ty as Encoder<B, ALIGN, {true}>>::IS_DYNAMIC {
+                    32
                 } else {
-                    align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE)
+                    align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE)
                 };
             }
         });
@@ -197,13 +106,13 @@ impl CodecStruct {
         let aligned_header_size = self.fields.iter().map(|field| {
             let ty = &field.ty;
             let ts = quote! {
-                <#ty as Encoder<B, ALIGN, {#sol_mode}>>
+                <#ty as Encoder<B, ALIGN, {true}>>
             };
             quote! {
                 if #ts ::IS_DYNAMIC {
                     32
                 } else {
-                    align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {#sol_mode}>>::HEADER_SIZE)
+                    align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE)
                 }
             }
         });
@@ -220,7 +129,7 @@ impl CodecStruct {
         });
 
         quote! {
-            impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, {#sol_mode}> for #struct_name #ty_generics #where_clause {
+            impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, {true}> for #struct_name #ty_generics #where_clause {
                 const HEADER_SIZE: usize = 0 #( + #header_sizes)*;
                 const IS_DYNAMIC: bool = #is_dynamic;
 
@@ -229,15 +138,11 @@ impl CodecStruct {
                     let aligned_offset = align_up::<ALIGN>(offset);
                     let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
                     let aligned_header_size = #aligned_header_size;
-
                     let mut dynamic_fields_count = 0;
-
-
 
                     // Write the dynamic struct offset if necessary
                     if is_dynamic {
                         let buf_len = buf.len();
-
                         let offset = if buf_len == 0 {
                             32
                         } else {
@@ -283,15 +188,98 @@ impl CodecStruct {
             }
         }
     }
+
+    fn generate_impl_wasm(&self) -> TokenStream {
+        let struct_name = &self.struct_name;
+        let (_impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+
+        let header_sizes = self.fields.iter().map(|field| {
+            let ty = &field.ty;
+            quote! {
+                align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {false}>>::HEADER_SIZE)
+            }
+        });
+
+        let is_dynamic_expr = self.fields.iter().map(|field| {
+            let ty = &field.ty;
+            quote! {
+                <#ty as Encoder<B, ALIGN, {false}>>::IS_DYNAMIC
+            }
+        });
+
+        let is_dynamic = quote! {
+            false #( || #is_dynamic_expr)*
+        };
+
+        let encode_fields = self.fields.iter().map(|field| {
+            let ident = &field.ident;
+            let ty = &field.ty;
+            quote! {
+                <#ty as Encoder<B, ALIGN, {false}>>::encode(&self.#ident, buf, current_offset)?;
+                current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {false}>>::HEADER_SIZE);
+            }
+        });
+
+        let decode_fields = self.fields.iter().map(|field| {
+            let ident = &field.ident;
+            let ty = &field.ty;
+            quote! {
+                let #ident = <#ty as Encoder<B, ALIGN, {false}>>::decode(buf, current_offset)?;
+
+                current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {false}>>::HEADER_SIZE);
+            }
+        });
+
+        let struct_initialization = self.fields.iter().map(|field| {
+            let ident = &field.ident;
+            quote! {
+                #ident
+            }
+        });
+
+        quote! {
+            impl<B:ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, {false}> for #struct_name #ty_generics #where_clause {
+                const HEADER_SIZE: usize = 0 #( + #header_sizes)*;
+                const IS_DYNAMIC: bool = #is_dynamic;
+
+                fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+                    let mut current_offset = align_up::<ALIGN>(offset);
+                    let header_size = <Self as Encoder<B, ALIGN, { false }>>::HEADER_SIZE;
+
+                    if buf.len() < current_offset + header_size {
+                        buf.resize(current_offset + header_size, 0);
+                    }
+
+                    #( #encode_fields )*
+
+                    Ok(())
+                }
+
+                fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+                    let mut current_offset = align_up::<ALIGN>(offset);
+
+                    #( #decode_fields )*
+
+                    Ok(#struct_name {
+                        #( #struct_initialization ),*
+                    })
+                }
+
+                fn partial_decode(buffer: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
+                    Ok((0,0))
+                }
+            }
+        }
+    }
 }
 
 impl ToTokens for CodecStruct {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let impl_true = self.generate_impl(true);
-        let impl_false = self.generate_impl(false);
+        let sol_mode = self.generate_impl_sol();
+        let wasm_mode = self.generate_impl_wasm();
         tokens.extend(quote! {
-            #impl_true
-            #impl_false
+            #sol_mode
+            #wasm_mode
         });
     }
 }
@@ -304,36 +292,4 @@ pub fn codec_macro_derive(input: proc_macro::TokenStream) -> proc_macro::TokenSt
         #codec_struct
     }
     .into()
-}
-
-trait IsDynamic {
-    const IS_DYNAMIC: bool;
-}
-
-impl<T> IsDynamic for Vec<T> {
-    const IS_DYNAMIC: bool = true;
-}
-fn is_dynamic(field: &Field) -> bool {
-    let ty = &field.ty;
-    let is_dynamic_expr: TokenStream = quote! {
-        <Vec<u32> as IsDynamic>::IS_DYNAMIC
-    };
-
-    let parsed = parse2::<ExprLit>(is_dynamic_expr);
-
-    eprintln!(">>> parsed: {:?}", parsed.err());
-    // .ok()
-    // .and_then(|expr_lit| match expr_lit.lit {
-    //     Lit::Bool(lit_bool) => {
-    //         let val = lit_bool.value();
-    //         eprintln!(">>> val: {}", val);
-    //         Some(val)
-    //     }
-    //     _ => {
-    //         eprintln!(">>> not bool");
-    //         None
-    //     }
-    // })
-    // .unwrap_or(false)
-    false
 }

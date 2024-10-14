@@ -68,24 +68,14 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Bytes {
     /// After that, we encode the actual data and write it to the end of the buffer.
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
-        let aligned_header_size =
-            align_up::<ALIGN>(<Self as Encoder<B, ALIGN, false>>::HEADER_SIZE);
-        let aligned_el_size = align_up::<ALIGN>(core::mem::size_of::<u32>());
+        let aligned_el_size = align_up::<ALIGN>(4);
 
         // Ensure the buffer has enough space for the offset + header size
-        if buf.len() < aligned_offset + aligned_header_size {
-            buf.resize(aligned_offset + aligned_header_size, 0);
+        if buf.len() < aligned_offset + aligned_el_size {
+            buf.resize(aligned_offset + aligned_el_size, 0);
         }
 
-        // Write the offset of the data (current length of the buffer)
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
-
-        let _ = write_bytes::<B, ALIGN, false>(
-            buf,
-            aligned_offset + aligned_el_size,
-            self,
-            self.len() as u32,
-        );
+        let _ = write_bytes::<B, ALIGN, false>(buf, aligned_offset, self, self.len() as u32);
 
         // Add padding if necessary to ensure the buffer remains aligned
         if buf.len() % ALIGN != 0 {
@@ -423,11 +413,12 @@ mod tests {
         assert_eq!(buf.to_vec(), expected);
 
         let mut encoded = buf.freeze();
+        println!("Encoded Bytes: {:?}", encoded.to_vec());
 
         let decoded = read_bytes::<BigEndian, 8, false>(&mut encoded, 0).unwrap();
 
         println!("Decoded Bytes: {:?}", decoded.to_vec());
-        assert_eq!(decoded.to_vec()[12..], original.to_vec());
+        assert_eq!(decoded.to_vec(), original.to_vec());
     }
 
     #[test]
