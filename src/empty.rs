@@ -1,10 +1,10 @@
 use crate::{
+    alloc::string::ToString,
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
     error::{CodecError, DecodingError},
 };
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
-
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct EmptyVec;
 

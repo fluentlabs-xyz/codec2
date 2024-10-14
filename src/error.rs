@@ -1,51 +1,89 @@
-use thiserror::Error;
+extern crate alloc;
 
-#[derive(Debug, Error)]
+use alloc::{fmt, string::String};
+use core::fmt::{Display, Formatter};
+
+#[derive(Debug)]
 pub enum CodecError {
-    #[error("Overflow error")]
     Overflow,
-    #[error("Encoding error: {0}")]
-    Encoding(#[from] EncodingError),
-
-    #[error("Decoding error: {0}")]
-    Decoding(#[from] DecodingError),
+    Encoding(EncodingError),
+    Decoding(DecodingError),
 }
 
-#[derive(Debug, Error)]
+impl Display for CodecError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            CodecError::Overflow => write!(f, "Overflow error"),
+            CodecError::Encoding(err) => write!(f, "Encoding error: {}", err),
+            CodecError::Decoding(err) => write!(f, "Decoding error: {}", err),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum EncodingError {
-    #[error("Not enough space in the buf: required {required} bytes, but only {available} bytes available. {details}"
-    )]
     BufferTooSmall {
         required: usize,
         available: usize,
         details: String,
     },
-
-    #[error("Invalid data provided for encoding: {0}")]
     InvalidInputData(String),
 }
 
-#[derive(Debug, Error)]
-pub enum DecodingError {
-    #[error("Invalid data encountered during decoding: {0}")]
-    InvalidData(String),
+impl Display for EncodingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            EncodingError::BufferTooSmall {
+                required,
+                available,
+                details,
+            } => {
+                write!(f, "Not enough space in the buf: required {} bytes, but only {} bytes available. {}", required, available, details)
+            }
+            EncodingError::InvalidInputData(msg) => {
+                write!(f, "Invalid data provided for encoding: {}", msg)
+            }
+        }
+    }
+}
 
-    #[error("Not enough data in the buf: expected at least {expected} bytes, found {found}")]
+#[derive(Debug)]
+pub enum DecodingError {
+    InvalidData(String),
     BufferTooSmall {
         expected: usize,
         found: usize,
         msg: String,
     },
-
-    #[error("Buffer overflow: {msg}")]
-    BufferOverflow { msg: String },
-
-    #[error("Unexpected end of buf")]
+    BufferOverflow {
+        msg: String,
+    },
     UnexpectedEof,
-
-    #[error("Overflow error")]
     Overflow,
-
-    #[error("Parsing error: {0}")]
     ParseError(String),
+}
+
+impl Display for DecodingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            DecodingError::InvalidData(msg) => {
+                write!(f, "Invalid data encountered during decoding: {}", msg)
+            }
+            DecodingError::BufferTooSmall {
+                expected,
+                found,
+                msg,
+            } => {
+                write!(
+                    f,
+                    "Not enough data in the buf: expected at least {} bytes, found {}. {}",
+                    expected, found, msg
+                )
+            }
+            DecodingError::BufferOverflow { msg } => write!(f, "Buffer overflow: {}", msg),
+            DecodingError::UnexpectedEof => write!(f, "Unexpected end of buf"),
+            DecodingError::Overflow => write!(f, "Overflow error"),
+            DecodingError::ParseError(msg) => write!(f, "Parsing error: {}", msg),
+        }
+    }
 }

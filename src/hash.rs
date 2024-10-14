@@ -3,7 +3,7 @@ use crate::{
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
     error::{CodecError, DecodingError},
 };
-use alloc::vec::Vec;
+use alloc::{format, string::ToString, vec::Vec};
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
 use core::{fmt::Debug, hash::Hash};

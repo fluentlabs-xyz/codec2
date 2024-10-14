@@ -1,4 +1,5 @@
 use crate::{
+    alloc::string::ToString,
     bytes::{read_bytes, read_bytes_header, write_bytes_solidity, write_bytes_wasm},
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
     error::{CodecError, DecodingError},
@@ -25,7 +26,7 @@ use bytes::{Buf, BytesMut};
 /// Implementation for non-Solidity mode
 impl<T, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Vec<T>
 where
-    T: Default + Sized + Encoder<B, { ALIGN }, false> + std::fmt::Debug,
+    T: Default + Sized + Encoder<B, { ALIGN }, false> + alloc::fmt::Debug,
 {
     const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3;
     const IS_DYNAMIC: bool = true;
@@ -104,7 +105,7 @@ where
 // Implementation for Solidity mode
 impl<T, B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Vec<T>
 where
-    T: Default + Sized + Encoder<B, { ALIGN }, true> + std::fmt::Debug,
+    T: Default + Sized + Encoder<B, { ALIGN }, true> + alloc::fmt::Debug,
 {
     const HEADER_SIZE: usize = 32;
     const IS_DYNAMIC: bool = true;

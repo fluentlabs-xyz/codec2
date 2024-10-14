@@ -1,7 +1,7 @@
-use crate::error::CodecError;
+use crate::{alloc::string::ToString, error::CodecError};
 use byteorder::{ByteOrder, BE, LE};
 use bytes::{Buf, Bytes, BytesMut};
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 // TODO: @d1r1 Investigate whether decoding the result into an uninitialized memory (e.g., using
 // `MaybeUninit`) would be more efficient than initializing with `Default`.

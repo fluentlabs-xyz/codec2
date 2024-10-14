@@ -1,4 +1,5 @@
 use crate::{
+    alloc::string::ToString,
     bytes::{read_bytes, read_bytes_header, write_bytes},
     encoder::{align_up, get_aligned_slice, is_big_endian, write_u32_aligned, Encoder},
     error::{CodecError, DecodingError},
@@ -6,7 +7,6 @@ use crate::{
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
-use std::usize;
 
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
     const HEADER_SIZE: usize = 32;

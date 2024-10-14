@@ -1,4 +1,5 @@
 use crate::{
+    alloc::string::ToString,
     encoder::{align_up, get_aligned_indices, get_aligned_slice, is_big_endian, Encoder},
     error::{CodecError, DecodingError},
 };

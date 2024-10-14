@@ -1,4 +1,5 @@
 use crate::{
+    alloc::string::ToString,
     encoder::{align_up, Encoder},
     error::CodecError,
 };
