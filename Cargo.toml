@@ -26,6 +26,14 @@ fluentbase-sdk = { path = "../fluentbase/crates/sdk", features = ["std"] }
 
 [profile.dev]
 panic = "abort"
-
 [profile.release]
 panic = "abort"
+
+
+[features]
+default = ["std", "derive"]
+std = [
+    "byteorder/std",
+    "alloy-primitives/std",
+]
+derive = []
