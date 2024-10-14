@@ -10,7 +10,7 @@ pub struct EmptyVec;
 
 // Implementation for WASM mode (SOL_MODE = false)
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for EmptyVec {
-    const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 3; // 12 bytes
+    const HEADER_SIZE: usize = size_of::<u32>() * 3; // 12 bytes
     const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {

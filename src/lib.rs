@@ -1,3 +1,5 @@
+extern crate alloc;
+
 pub mod bytes;
 pub mod empty;
 pub mod encoder;

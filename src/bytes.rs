@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use crate::{
     encoder::{align_up, read_u32_aligned, write_u32_aligned},
     error::{CodecError, DecodingError},
@@ -43,7 +41,7 @@ pub fn write_bytes<B, const ALIGN: usize, const SOL_MODE: bool>(
     buf: &mut BytesMut,
     header_offset: usize,
     data: &[u8],
-    elements: u32, // number of elements in dynamic array
+    elements: u32, // number of elements in a dynamic array
 ) -> usize
 where
     B: ByteOrder,
@@ -204,13 +202,14 @@ pub fn read_bytes_header_solidity<B: ByteOrder, const ALIGN: usize>(
 
     Ok((data_offset, data_len))
 }
+
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::encoder::{SolidityABI, WasmABI};
     use alloy_sol_types::{sol_data, SolType};
     use byteorder::{BigEndian, LE};
+
     #[test]
     fn test_write_bytes_sol() {
         let mut buf = BytesMut::new();

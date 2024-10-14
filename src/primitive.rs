@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use crate::{
     encoder::{align_up, get_aligned_indices, get_aligned_slice, is_big_endian, Encoder},
     error::{CodecError, DecodingError},
@@ -8,7 +6,7 @@ use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
 
 impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, SOL_MODE> for u8 {
-    const HEADER_SIZE: usize = core::mem::size_of::<u8>();
+    const HEADER_SIZE: usize = size_of::<u8>();
     const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {

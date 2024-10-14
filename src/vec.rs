@@ -1,4 +1,3 @@
-extern crate alloc;
 use crate::{
     bytes::{read_bytes, read_bytes_header, write_bytes_solidity, write_bytes_wasm},
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},

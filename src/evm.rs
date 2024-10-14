@@ -1,12 +1,6 @@
 use crate::{
     bytes::{read_bytes, read_bytes_header, write_bytes},
-    encoder::{
-        align_up,
-        get_aligned_slice,
-        is_big_endian,
-        write_u32_aligned,
-        Encoder,
-    },
+    encoder::{align_up, get_aligned_slice, is_big_endian, write_u32_aligned, Encoder},
     error::{CodecError, DecodingError},
 };
 use alloy_primitives::{Address, Bytes, FixedBytes, Uint};
@@ -59,7 +53,7 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for Bytes {
 }
 
 impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Bytes {
-    const HEADER_SIZE: usize = core::mem::size_of::<u32>() * 2;
+    const HEADER_SIZE: usize = size_of::<u32>() * 2;
     const IS_DYNAMIC: bool = true;
 
     /// Encode the bytes into the buffer.
@@ -69,7 +63,7 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Bytes {
         let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_el_size = align_up::<ALIGN>(4);
 
-        // Ensure the buffer has enough space for the offset + header size
+        // Ensure the buffer has enough space for the offset and header size
         if buf.len() < aligned_offset + aligned_el_size {
             buf.resize(aligned_offset + aligned_el_size, 0);
         }
@@ -86,7 +80,7 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for Bytes {
     }
 
     /// Decode the bytes from the buffer.
-    /// Reads the header to get the data offset and size, then reads the actual data.
+    /// Reads the header to get the data offset and size, then read the actual data.
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
         Ok(Self::from(read_bytes::<B, ALIGN, false>(buf, offset)?))
     }
@@ -268,6 +262,7 @@ macro_rules! impl_evm_fixed {
 }
 
 impl_evm_fixed!(Address);
+
 impl<const BITS: usize, const LIMBS: usize, B: ByteOrder, const ALIGN: usize>
     Encoder<B, { ALIGN }, false> for Uint<BITS, LIMBS>
 {

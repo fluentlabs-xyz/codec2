@@ -1,16 +1,11 @@
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
-    parse2,
     parse_macro_input,
-    token::Token,
     Data,
     DeriveInput,
-    ExprLit,
-    Field,
     Fields,
     Ident,
-    Lit,
 };
 
 struct FieldInfo {

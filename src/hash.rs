@@ -1,4 +1,3 @@
-extern crate alloc;
 use crate::{
     bytes::{read_bytes_header, write_bytes, write_bytes_solidity, write_bytes_wasm},
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
@@ -80,14 +79,12 @@ where
         let length = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
 
         let (keys_offset, keys_length) =
-            read_bytes_header::<B, { ALIGN }, false>(buf, aligned_offset + aligned_header_el_size)
-                .unwrap();
+            read_bytes_header::<B, { ALIGN }, false>(buf, aligned_offset + aligned_header_el_size)?;
 
         let (values_offset, values_length) = read_bytes_header::<B, { ALIGN }, false>(
             buf,
             aligned_offset + aligned_header_el_size * 3,
-        )
-        .unwrap();
+        )?;
 
         let key_bytes = &buf.chunk()[keys_offset..keys_offset + keys_length];
         let value_bytes = &buf.chunk()[values_offset..values_offset + values_length];
@@ -128,11 +125,9 @@ where
         }
 
         let (keys_offset, keys_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))
-                .unwrap();
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))?;
         let (_values_offset, values_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(12))
-                .unwrap();
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(12))?;
 
         Ok((keys_offset, keys_length + values_length))
     }
@@ -173,10 +168,10 @@ where
             key.encode(&mut key_buf, key_offset)?;
         }
         let relative_key_offset = buf.len() - aligned_offset - 64;
-        // Write keys offset
+        // Write key offset
         write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 64, relative_key_offset as u32);
 
-        // write keys header and keys data to tbuf
+        // write key header and keys data to the buf
         write_bytes_solidity::<B, ALIGN>(buf, aligned_offset + 64, &key_buf, entries.len() as u32);
 
         // Write values offset
@@ -283,11 +278,9 @@ where
         }
 
         let (keys_offset, keys_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))
-                .unwrap();
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))?;
         let (_values_offset, values_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(12))
-                .unwrap();
+            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(12))?;
 
         Ok((keys_offset, keys_length + values_length))
     }
@@ -300,6 +293,7 @@ where
 {
     const HEADER_SIZE: usize = 4 + 8; // length + data_header
     const IS_DYNAMIC: bool = true;
+
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_header_el_size = align_up::<ALIGN>(4);
@@ -313,7 +307,7 @@ where
         // Write set size
         write_u32_aligned::<B, ALIGN>(buf, aligned_offset, self.len() as u32);
 
-        // Make sure set is sorted
+        // Make sure a set is sorted
         let mut entries: Vec<_> = self.iter().collect();
         entries.sort();
 

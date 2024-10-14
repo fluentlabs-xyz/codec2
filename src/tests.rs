@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use crate::{
     encoder::{
         align_up,
@@ -57,8 +55,8 @@ struct TestStruct {
     u8_val: u8,
     uint_val: (u16, u32, u64),
     int_val: (i16, i32, i64),
-    u256_val: alloy_primitives::U256,
-    address_val: alloy_primitives::Address,
+    u256_val: U256,
+    address_val: Address,
     bytes_val: Bytes,
     vec_val: Vec<u32>,
 }

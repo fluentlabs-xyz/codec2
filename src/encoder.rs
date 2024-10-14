@@ -172,6 +172,7 @@ pub fn read_u32_aligned<B: ByteOrder, const ALIGN: usize>(
         Ok(B::read_u32(&buf.chunk()[offset..offset + 4]))
     }
 }
+
 pub fn read_u32_aligned1<B: ByteOrder, const ALIGN: usize>(
     buf: &impl Buf,
     offset: usize,
