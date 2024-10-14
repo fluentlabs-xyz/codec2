@@ -224,8 +224,7 @@ fn test_nested_struct_sol() {
 }
 
 mod wasm {
-    use crate::tests::print_bytes;
-    use byteorder::LE;
+
     use fluentbase_codec::{BufferEncoder, Codec as OldCodec, Encoder};
     use fluentbase_sdk::Bytes;
 

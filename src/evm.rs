@@ -1,10 +1,9 @@
 use crate::{
-    bytes::{read_bytes, read_bytes_header, read_bytes_header_solidity, write_bytes},
+    bytes::{read_bytes, read_bytes_header, write_bytes},
     encoder::{
         align_up,
         get_aligned_slice,
         is_big_endian,
-        read_u32_aligned,
         write_u32_aligned,
         Encoder,
     },
