@@ -49,6 +49,10 @@ impl Display for EncodingError {
 
 #[derive(Debug)]
 pub enum DecodingError {
+    InvalidSelector {
+        expected: [u8; 4],
+        found: [u8; 4],
+    },
     InvalidData(String),
     BufferTooSmall {
         expected: usize,
@@ -66,6 +70,13 @@ pub enum DecodingError {
 impl Display for DecodingError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            DecodingError::InvalidSelector { expected, found } => {
+                write!(
+                    f,
+                    "Invalid selector: expected {:?}, found {:?}",
+                    expected, found
+                )
+            }
             DecodingError::InvalidData(msg) => {
                 write!(f, "Invalid data encountered during decoding: {}", msg)
             }

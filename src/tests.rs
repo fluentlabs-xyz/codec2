@@ -62,6 +62,105 @@ struct TestStruct {
 }
 
 #[test]
+fn test_struct_1_field() {
+    sol! {
+        struct TestStructSol {
+            bytes bytes_val;
+        }
+    }
+
+    let test_struct = TestStructSol {
+        bytes_val: Bytes::from("Hello, World!!".as_bytes()),
+    };
+
+    let sol_encoded = &test_struct.abi_encode();
+
+    println!("{:?}", hex::encode(&sol_encoded));
+
+    #[derive(Codec, Default, Debug, PartialEq)]
+    struct TestStruct {
+        bytes_val: Bytes,
+    }
+    let test_struct = TestStruct {
+        bytes_val: Bytes::from("Hello, World!!".as_bytes()),
+    };
+
+    let mut buf = BytesMut::new();
+
+    SolidityABI::encode(&test_struct, &mut buf, 0).unwrap();
+
+    let fluent_encoded = buf.freeze();
+
+    println!("{:?}", hex::encode(&fluent_encoded));
+
+    // assert_eq!(sol_encoded, fluent_encoded);
+}
+
+#[test]
+fn test_tuple_bytes_address_sol() {
+    let b = Bytes::from("Hello, World!!".as_bytes());
+    let a = Address::repeat_byte(0xAA);
+    // Создаем кортеж
+    let tuple = (b.clone(), a.clone());
+
+    // Определяем тип для кортежа
+    type TupleType = sol!(tuple(bytes, address));
+
+    // Кодируем кортеж
+    let encoded_sol = TupleType::abi_encode(&tuple);
+
+    println!("Encoded data sol: 0x{}", hex::encode(&encoded_sol));
+
+    let decoded_sol = TupleType::abi_decode(&encoded_sol, false).unwrap();
+
+    assert_eq!(tuple, decoded_sol);
+
+    type TupleTypeMy = (Bytes, Address);
+
+    let mut buf = BytesMut::new();
+    let tuple = (b.clone(), a.clone());
+    SolidityABI::encode(&tuple, &mut buf, 0).unwrap();
+
+    let encoded = buf.freeze();
+
+    println!("Encoded data our: 0x{}", hex::encode(&encoded));
+
+    assert_eq!(encoded.to_vec(), encoded_sol);
+
+    let decoded = SolidityABI::<TupleTypeMy>::decode(&&encoded_sol[..], 0).unwrap();
+
+    assert_eq!(tuple, decoded);
+}
+
+#[test]
+fn test_tuple_single_sol() {
+    let b = Bytes::from("Hello, World!!".as_bytes());
+
+    type TupleType1 = sol!(tuple(bytes,));
+
+    let tuple = (b.clone(),);
+    let encoded_sol = tuple.abi_encode();
+
+    let decoded_sol = TupleType1::abi_decode(&encoded_sol, false).unwrap();
+
+    assert_eq!(tuple, decoded_sol);
+
+    type TupleTypeMy = (Bytes,);
+
+    let mut buf = BytesMut::new();
+    let tuple = (b.clone(),);
+    SolidityABI::encode(&tuple, &mut buf, 0).unwrap();
+
+    let encoded = buf.freeze();
+
+    assert_eq!(encoded.to_vec(), encoded_sol);
+
+    let decoded = SolidityABI::<TupleTypeMy>::decode(&&encoded_sol[..], 0).unwrap();
+
+    assert_eq!(tuple, decoded);
+}
+
+#[test]
 fn test_struct_sol() {
     // Create an instance of TestStruct
     let test_struct = TestStruct {

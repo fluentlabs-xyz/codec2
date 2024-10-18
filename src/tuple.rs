@@ -1,6 +1,6 @@
 use crate::{
     alloc::string::ToString,
-    encoder::{align_up, Encoder},
+    encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
     error::CodecError,
 };
 use byteorder::ByteOrder;
@@ -15,11 +15,34 @@ where
     const IS_DYNAMIC: bool = T::IS_DYNAMIC;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        self.0.encode(buf, offset)
+        let aligned_offset = align_up::<ALIGN>(offset);
+
+        if Self::IS_DYNAMIC {
+            let buf_len = buf.len();
+            let offset = if buf_len == 0 { 32 } else { buf_len };
+            write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
+
+            let aligned_header_size = align_up::<ALIGN>(T::HEADER_SIZE);
+            let mut tmp = BytesMut::zeroed(aligned_header_size);
+            self.0.encode(&mut tmp, 0)?;
+            buf.extend_from_slice(&tmp);
+        } else {
+            self.0.encode(buf, aligned_offset)?;
+        }
+
+        Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        Ok((T::decode(buf, offset)?,))
+        let aligned_offset = align_up::<ALIGN>(offset);
+        let tmp = if Self::IS_DYNAMIC {
+            let offset = read_u32_aligned::<B, ALIGN>(&buf.chunk(), aligned_offset)? as usize;
+            &buf.chunk()[offset..]
+        } else {
+            &buf.chunk()[aligned_offset..]
+        };
+
+        Ok((T::decode(&tmp, 0)?,))
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
@@ -51,34 +74,70 @@ macro_rules! impl_encoder_for_tuple {
             };
 
             fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-                let mut current_offset = align_up::<ALIGN>(offset);
-                $(
-                    self.$idx.encode(buf, current_offset)?;
-                    current_offset = align_up::<ALIGN>(current_offset + $T::HEADER_SIZE);
-                )+
+                let mut aligned_offset = align_up::<ALIGN>(offset);
+
+                if Self::IS_DYNAMIC {
+                    let buf_len = buf.len();
+                    let offset = if buf_len == 0 { 32 } else { buf_len };
+                    write_u32_aligned::<B, ALIGN>(buf, aligned_offset, offset as u32);
+
+                    let aligned_header_size = {
+                        let mut size = 0;
+                        $(
+                            size += align_up::<ALIGN>($T::HEADER_SIZE);
+                        )+
+                        size
+                    };
+
+                    let mut tmp = BytesMut::zeroed(aligned_header_size);
+                    let mut current_offset = 0;
+
+                    $(
+                        self.$idx.encode(&mut tmp, current_offset)?;
+                        if $T::IS_DYNAMIC {
+                            current_offset += 32;
+                        } else {
+                            current_offset += align_up::<ALIGN>($T::HEADER_SIZE);
+                        }
+                    )+
+
+                    buf.extend_from_slice(&tmp);
+                } else {
+                    $(
+                        self.$idx.encode(buf, aligned_offset)?;
+                        aligned_offset += align_up::<ALIGN>($T::HEADER_SIZE);
+                    )+
+                }
+
                 Ok(())
             }
 
             fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-                let mut current_offset = align_up::<ALIGN>(offset);
+                let mut aligned_offset = align_up::<ALIGN>(offset);
+                let tmp = if Self::IS_DYNAMIC {
+                    let offset = read_u32_aligned::<B, ALIGN>(&buf.chunk(), aligned_offset)? as usize;
+                    &buf.chunk()[offset..]
+                } else {
+                    &buf.chunk()[aligned_offset..]
+                };
+
+                let mut current_offset = 0;
+
                 Ok(($(
                     {
-                        let value = $T::decode(buf, current_offset)?;
-                        current_offset = align_up::<ALIGN>(current_offset + $T::HEADER_SIZE);
+                        let value = $T::decode(&tmp, current_offset)?;
+                        current_offset += if $T::IS_DYNAMIC {
+                            32
+                        } else {
+                            align_up::<ALIGN>($T::HEADER_SIZE)
+                        };
                         value
                     },
                 )+))
             }
 
             fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-                let mut total_size = 0;
-                let mut current_offset = align_up::<ALIGN>(offset);
-                $(
-                    let (_, size) = $T::partial_decode(buf, current_offset)?;
-                    current_offset = align_up::<ALIGN>(current_offset + size);
-                    total_size += size;
-                )+
-                Ok((offset, total_size))
+                Ok((0, 0))
             }
         }
     };
