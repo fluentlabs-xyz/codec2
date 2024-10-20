@@ -66,6 +66,10 @@ macro_rules! define_encoder_mode {
         where
             T: Encoder<$byte_order, $align, $sol_mode>,
         {
+            pub fn is_dynamic() -> bool {
+                <T as Encoder<$byte_order, $align, $sol_mode>>::IS_DYNAMIC
+            }
+
             pub fn encode(value: &T, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
                 value.encode(buf, offset)
             }
@@ -251,4 +255,13 @@ pub fn ensure_buf_size(buf: &mut BytesMut, required_size: usize) {
     if buf.len() < required_size {
         buf.resize(required_size, 0);
     }
+}
+
+pub fn is_dynamic<
+    T: Encoder<B, ALIGN, SOL_MODE>,
+    B: ByteOrder,
+    const ALIGN: usize,
+    const SOL_MODE: bool,
+>() -> bool {
+    T::IS_DYNAMIC
 }

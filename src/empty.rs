@@ -14,36 +14,34 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for EmptyVec
     const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_elem_size = align_up::<ALIGN>(4);
 
         // Write number of elements (0 for EmptyVec)
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, 0);
+        write_u32_aligned::<B, ALIGN>(buf, offset, 0);
 
         // Write offset and length (both 0 for EmptyVec)
         write_u32_aligned::<B, ALIGN>(
             buf,
-            aligned_offset + aligned_elem_size,
+            offset + aligned_elem_size,
             (aligned_elem_size * 3) as u32,
         );
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2, 0);
+        write_u32_aligned::<B, ALIGN>(buf, offset + aligned_elem_size * 2, 0);
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_elem_size = align_up::<ALIGN>(4);
 
-        if buf.remaining() < aligned_offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE {
+        if buf.remaining() < offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE,
+                expected: offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE,
                 found: buf.remaining(),
                 msg: "failed to decode EmptyVec".to_string(),
             }));
         }
 
-        let count = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)?;
+        let count = read_u32_aligned::<B, ALIGN>(buf, offset)?;
         if count != 0 {
             return Err(CodecError::Decoding(DecodingError::InvalidData(
                 "EmptyVec must have count of 0".to_string(),
@@ -51,10 +49,9 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for EmptyVec
         }
 
         // Read and verify offset and length
-        let data_offset =
-            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size)? as usize;
+        let data_offset = read_u32_aligned::<B, ALIGN>(buf, offset + aligned_elem_size)? as usize;
         let data_length =
-            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2)? as usize;
+            read_u32_aligned::<B, ALIGN>(buf, offset + aligned_elem_size * 2)? as usize;
 
         if data_offset != <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE || data_length != 0 {
             return Err(CodecError::Decoding(DecodingError::InvalidData(
@@ -66,28 +63,26 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, false> for EmptyVec
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_elem_size = align_up::<ALIGN>(4);
 
-        if buf.remaining() < aligned_offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE {
+        if buf.remaining() < offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE,
+                expected: offset + <Self as Encoder<B, ALIGN, false>>::HEADER_SIZE,
                 found: buf.remaining(),
                 msg: "failed to partially decode EmptyVec".to_string(),
             }));
         }
 
-        let count = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)?;
+        let count = read_u32_aligned::<B, ALIGN>(buf, offset)?;
         if count != 0 {
             return Err(CodecError::Decoding(DecodingError::InvalidData(
                 "EmptyVec must have count of 0".to_string(),
             )));
         }
 
-        let data_offset =
-            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size)? as usize;
+        let data_offset = read_u32_aligned::<B, ALIGN>(buf, offset + aligned_elem_size)? as usize;
         let data_length =
-            read_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2)? as usize;
+            read_u32_aligned::<B, ALIGN>(buf, offset + aligned_elem_size * 2)? as usize;
 
         Ok((data_offset, data_length))
     }
@@ -99,29 +94,25 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for EmptyVec 
     const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
         // Write offset to data
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, (aligned_offset + 32) as u32);
+        write_u32_aligned::<B, ALIGN>(buf, offset, (offset + 32) as u32);
 
         // Write length (0 for EmptyVec)
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 32, 0);
+        write_u32_aligned::<B, ALIGN>(buf, offset + 32, 0);
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
-        if buf.remaining() < aligned_offset + 32 {
+        if buf.remaining() < offset + 32 {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + 32,
+                expected: offset + 32,
                 found: buf.remaining(),
                 msg: "failed to decode EmptyVec".to_string(),
             }));
         }
 
-        let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
+        let data_offset = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
         let length = read_u32_aligned::<B, ALIGN>(buf, data_offset)? as usize;
 
         if length != 0 {
@@ -134,17 +125,15 @@ impl<B: ByteOrder, const ALIGN: usize> Encoder<B, { ALIGN }, true> for EmptyVec 
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
-        if buf.remaining() < aligned_offset + 32 {
+        if buf.remaining() < offset + 32 {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + 32,
+                expected: offset + 32,
                 found: buf.remaining(),
                 msg: "failed to partially decode EmptyVec".to_string(),
             }));
         }
 
-        let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
+        let data_offset = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
         let length = read_u32_aligned::<B, ALIGN>(buf, data_offset)? as usize;
 
         Ok((data_offset, length))
@@ -218,7 +207,8 @@ mod tests {
         <EmptyVec as Encoder<LittleEndian, 4, false>>::encode(&empty_vec, &mut buf, 3).unwrap();
 
         let encoded = buf.freeze();
-        assert_eq!(hex::encode(&encoded), "ffffff00000000000c00000000000000");
+        println!("{}", hex::encode(&encoded));
+        assert_eq!(hex::encode(&encoded), "ffffff000000000c00000000000000");
 
         let decoded = <EmptyVec as Encoder<LittleEndian, 4, false>>::decode(&encoded, 3).unwrap();
         assert_eq!(empty_vec, decoded);

@@ -100,14 +100,12 @@ fn test_struct_1_field() {
 fn test_tuple_bytes_address_sol() {
     let b = Bytes::from("Hello, World!!".as_bytes());
     let a = Address::repeat_byte(0xAA);
-    // Создаем кортеж
+
     let tuple = (b.clone(), a.clone());
 
-    // Определяем тип для кортежа
     type TupleType = sol!(tuple(bytes, address));
 
-    // Кодируем кортеж
-    let encoded_sol = TupleType::abi_encode(&tuple);
+    let encoded_sol = tuple.abi_encode();
 
     println!("Encoded data sol: 0x{}", hex::encode(&encoded_sol));
 

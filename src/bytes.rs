@@ -40,7 +40,7 @@ use core::mem;
 /// ```
 pub fn write_bytes<B, const ALIGN: usize, const SOL_MODE: bool>(
     buf: &mut BytesMut,
-    header_offset: usize,
+    offset: usize,
     data: &[u8],
     elements: u32, // number of elements in a dynamic array
 ) -> usize
@@ -48,24 +48,23 @@ where
     B: ByteOrder,
 {
     if SOL_MODE {
-        write_bytes_solidity::<B, ALIGN>(buf, header_offset, data, elements)
+        write_bytes_solidity::<B, ALIGN>(buf, offset, data, elements)
     } else {
-        write_bytes_wasm::<B, ALIGN>(buf, header_offset, data)
+        write_bytes_wasm::<B, ALIGN>(buf, offset, data)
     }
 }
 
 /// Write bytes in Solidity compatible format
 pub fn write_bytes_solidity<B: ByteOrder, const ALIGN: usize>(
     buf: &mut BytesMut,
-    header_offset: usize,
+    offset: usize,
     data: &[u8],
     elements: u32, // Number of elements
 ) -> usize {
-    let aligned_offset = align_up::<ALIGN>(header_offset);
-
     // Ensure we have enough space to write the offset
-    if buf.len() < aligned_offset {
-        buf.resize(aligned_offset, 0);
+
+    if buf.len() < offset {
+        buf.resize(offset, 0);
     }
     let data_offset = buf.len();
 
@@ -82,24 +81,23 @@ pub fn write_bytes_solidity<B: ByteOrder, const ALIGN: usize>(
 /// Write bytes in WASM compatible format
 pub fn write_bytes_wasm<B: ByteOrder, const ALIGN: usize>(
     buf: &mut BytesMut,
-    header_offset: usize,
+    offset: usize,
     data: &[u8],
 ) -> usize {
-    let aligned_offset = align_up::<ALIGN>(header_offset);
     let aligned_elem_size = align_up::<ALIGN>(mem::size_of::<u32>());
     let aligned_header_size = aligned_elem_size * 2;
 
     // Ensure we have enough space to write the header
-    if buf.len() < aligned_offset + aligned_header_size {
-        buf.resize(aligned_offset + aligned_header_size, 0);
+    if buf.len() < offset + aligned_header_size {
+        buf.resize(offset + aligned_header_size, 0);
     }
 
     // We append the data to the end of buffer
     let data_offset = buf.len();
 
     // Write offset and data size
-    write_u32_aligned::<B, ALIGN>(buf, aligned_offset, data_offset as u32);
-    write_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size, data.len() as u32);
+    write_u32_aligned::<B, ALIGN>(buf, offset, data_offset as u32);
+    write_u32_aligned::<B, ALIGN>(buf, offset + aligned_elem_size, data.len() as u32);
 
     // Append the actual data
     buf.extend_from_slice(data);
@@ -137,21 +135,19 @@ pub fn read_bytes_header_wasm<B: ByteOrder, const ALIGN: usize>(
     buffer: &impl Buf,
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
-    let aligned_offset = align_up::<ALIGN>(offset);
     let aligned_elem_size = align_up::<ALIGN>(mem::size_of::<u32>());
 
-    if buffer.remaining() < aligned_offset + aligned_elem_size * 2 {
+    if buffer.remaining() < offset + aligned_elem_size * 2 {
         return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-            expected: aligned_offset + aligned_elem_size * 2,
+            expected: offset + aligned_elem_size * 2,
             found: buffer.remaining(),
             msg: "buffer too small to read bytes header".to_string(),
         }));
     }
 
-    let data_offset = read_u32_aligned::<B, ALIGN>(buffer, aligned_offset)? as usize;
+    let data_offset = read_u32_aligned::<B, ALIGN>(buffer, offset)? as usize;
 
-    let data_len =
-        read_u32_aligned::<B, ALIGN>(buffer, aligned_offset + aligned_elem_size)? as usize;
+    let data_len = read_u32_aligned::<B, ALIGN>(buffer, offset + aligned_elem_size)? as usize;
 
     Ok((data_offset, data_len))
 }
@@ -195,9 +191,7 @@ pub fn read_bytes_header_solidity<B: ByteOrder, const ALIGN: usize>(
     buf: &impl Buf,
     offset: usize,
 ) -> Result<(usize, usize), CodecError> {
-    let aligned_offset = align_up::<ALIGN>(offset);
-
-    let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
+    let data_offset = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
 
     let data_len = read_u32_aligned::<B, ALIGN>(buf, data_offset)? as usize;
 

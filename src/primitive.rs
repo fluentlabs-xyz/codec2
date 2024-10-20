@@ -11,15 +11,13 @@ impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, S
     const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let word_size =
-            align_up::<ALIGN>(ALIGN.max(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE));
+        let word_size = align_up::<ALIGN>(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE);
 
-        if buf.len() < aligned_offset + word_size {
-            buf.resize(aligned_offset + word_size, 0);
+        if buf.len() < offset + word_size {
+            buf.resize(offset + word_size, 0);
         }
 
-        let write_to = get_aligned_slice::<B, ALIGN>(buf, aligned_offset, 1);
+        let write_to = get_aligned_slice::<B, ALIGN>(buf, offset, 1);
 
         write_to[0] = *self;
 
@@ -27,19 +25,17 @@ impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, S
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let word_size =
-            align_up::<ALIGN>(ALIGN.max(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE));
+        let word_size = align_up::<ALIGN>(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE);
 
-        if buf.remaining() < aligned_offset + word_size {
+        if buf.remaining() < offset + word_size {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + word_size,
+                expected: offset + word_size,
                 found: buf.remaining(),
                 msg: "buf too small to read aligned u8".to_string(),
             }));
         }
 
-        let chunk = &buf.chunk()[aligned_offset..];
+        let chunk = &buf.chunk()[offset..];
         let value = if is_big_endian::<B>() {
             chunk[word_size - 1]
         } else {
@@ -50,7 +46,10 @@ impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, ALIGN, S
     }
 
     fn partial_decode(_buf: &impl Buf, _offset: usize) -> Result<(usize, usize), CodecError> {
-        Ok((0, <Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE))
+        Ok((
+            0,
+            align_up::<ALIGN>(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE),
+        ))
     }
 }
 
@@ -84,18 +83,15 @@ macro_rules! impl_int {
             const IS_DYNAMIC: bool = false;
 
             fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-                let aligned_offset = align_up::<ALIGN>(offset);
+                let word_size =
+                    align_up::<ALIGN>(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE);
 
-                let word_size = align_up::<ALIGN>(
-                    ALIGN.max(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE),
-                );
-
-                if buf.len() < aligned_offset + word_size {
-                    buf.resize(aligned_offset + word_size, 0);
+                if buf.len() < offset + word_size {
+                    buf.resize(offset + word_size, 0);
                 }
 
                 let (start, end) = get_aligned_indices::<B, ALIGN>(
-                    aligned_offset,
+                    offset,
                     <Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE,
                 );
 
@@ -105,13 +101,13 @@ macro_rules! impl_int {
                 // integer
                 let fill_val = if *self > 0 { 0x00 } else { 0xFF };
 
-                for i in aligned_offset..start {
+                for i in offset..start {
                     buf[i] = fill_val;
                 }
 
                 B::$write_method(&mut buf[start..end], *self);
 
-                for i in end..(aligned_offset + word_size) {
+                for i in end..(offset + word_size) {
                     buf[i] = fill_val;
                 }
 
@@ -119,20 +115,18 @@ macro_rules! impl_int {
             }
 
             fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-                let aligned_offset = align_up::<ALIGN>(offset);
-                let word_size = align_up::<ALIGN>(
-                    ALIGN.max(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE),
-                );
+                let word_size =
+                    align_up::<ALIGN>(<Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE);
 
-                if buf.remaining() < aligned_offset + ALIGN {
+                if buf.remaining() < offset + ALIGN {
                     return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                        expected: aligned_offset + ALIGN,
+                        expected: offset + ALIGN,
                         found: buf.remaining(),
                         msg: "buf too small to decode value".to_string(),
                     }));
                 }
 
-                let chunk = &buf.chunk()[aligned_offset..];
+                let chunk = &buf.chunk()[offset..];
                 let value = if is_big_endian::<B>() {
                     B::$read_method(
                         &chunk[word_size - <Self as Encoder<B, ALIGN, SOL_MODE>>::HEADER_SIZE
@@ -174,17 +168,15 @@ where
     const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
-        let required_space = aligned_offset + ALIGN.max(Self::HEADER_SIZE);
-        if buf.len() < required_space {
-            buf.resize(required_space, 0);
+        let aligned_header = align_up::<ALIGN>(Self::HEADER_SIZE);
+        if buf.len() < offset + aligned_header {
+            buf.resize(offset + aligned_header, 0);
         }
         // Get aligned slice for the option flag
-        let flag_slice = get_aligned_slice::<B, ALIGN>(buf, aligned_offset, 1);
+        let flag_slice = get_aligned_slice::<B, ALIGN>(buf, offset, 1);
         flag_slice[0] = if self.is_some() { 1 } else { 0 };
 
-        let inner_offset = aligned_offset + ALIGN;
+        let inner_offset = offset + ALIGN;
 
         match self {
             Some(inner_value) => inner_value.encode(buf, inner_offset)?,
@@ -198,25 +190,24 @@ where
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let aligned_data_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+        let aligned_header = align_up::<ALIGN>(Self::HEADER_SIZE);
 
-        if buf.remaining() < aligned_offset + aligned_data_size {
+        if buf.remaining() < offset + aligned_header {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_data_size,
+                expected: offset + aligned_header,
                 found: buf.remaining(),
                 msg: "buf too small".to_string(),
             }));
         }
 
-        let chunk = &buf.chunk()[aligned_offset..];
+        let chunk = &buf.chunk()[offset..];
         let option_flag = if is_big_endian::<B>() {
-            chunk[aligned_data_size - 1]
+            chunk[aligned_header - 1]
         } else {
             chunk[0]
         };
 
-        let chunk = &buf.chunk()[aligned_offset + ALIGN..];
+        let chunk = &buf.chunk()[offset + ALIGN..];
 
         if option_flag != 0 {
             let inner_value = T::decode(&chunk, 0)?;
@@ -227,32 +218,31 @@ where
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
+        let aligned_header = align_up::<ALIGN>(Self::HEADER_SIZE);
 
-        if buf.remaining() < aligned_offset + aligned_header_size {
+        if buf.remaining() < offset + aligned_header {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_header_size,
+                expected: offset + aligned_header,
                 found: buf.remaining(),
                 msg: "buf too small".to_string(),
             }));
         }
 
-        let chunk = &buf.chunk()[aligned_offset..];
+        let chunk = &buf.chunk()[offset..];
         let option_flag = if is_big_endian::<B>() {
             chunk[ALIGN - 1]
         } else {
             chunk[0]
         };
 
-        let chunk = &buf.chunk()[aligned_offset + ALIGN..];
+        let chunk = &buf.chunk()[offset + ALIGN..];
 
         if option_flag != 0 {
             let (_, inner_size) = T::partial_decode(&chunk, 0)?;
-            Ok((aligned_offset, aligned_header_size + inner_size))
+            Ok((offset, aligned_header + inner_size))
         } else {
             let aligned_data_size = align_up::<ALIGN>(T::HEADER_SIZE);
-            Ok((aligned_offset, aligned_header_size + aligned_data_size))
+            Ok((offset, aligned_header + aligned_data_size))
         }
     }
 }
@@ -266,58 +256,45 @@ where
     const IS_DYNAMIC: bool = false;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let item_size = align_up::<ALIGN>(T::HEADER_SIZE);
-        let total_size = aligned_offset + item_size * N;
 
-        if buf.len() < total_size {
-            buf.resize(total_size, 0);
+        if buf.len() < offset + (item_size * N) {
+            buf.resize(offset + (item_size * N), 0);
         }
 
         for (i, item) in self.iter().enumerate() {
-            item.encode(buf, aligned_offset + i * item_size)?;
+            item.encode(buf, offset + (item_size * i))?;
         }
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let item_size = align_up::<ALIGN>(T::HEADER_SIZE);
-        let total_size = aligned_offset + item_size * N;
+        let total_size = offset + (item_size * N);
 
         if buf.remaining() < total_size {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
                 expected: total_size,
                 found: buf.remaining(),
-                msg: "buf too small".to_string(),
+                msg: "buf too small to decode [T; N]".to_string(),
             }));
         }
 
         let mut result = [T::default(); N];
-        let elem_size = align_up::<ALIGN>(T::HEADER_SIZE);
 
         for (i, item) in result.iter_mut().enumerate() {
-            *item = T::decode(buf, aligned_offset + i * elem_size)?;
+            *item = T::decode(buf, offset + (item_size * i))?;
         }
 
         Ok(result)
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let item_size = align_up::<ALIGN>(T::HEADER_SIZE);
         let total_size = item_size * N;
 
-        if buf.remaining() < aligned_offset + total_size {
-            return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + total_size,
-                found: buf.remaining(),
-                msg: "Buffer too small to decode array".to_string(),
-            }));
-        }
-
-        Ok((aligned_offset, total_size))
+        Ok((offset, total_size))
     }
 }
 
@@ -357,7 +334,7 @@ mod tests {
             0,
         )
         .unwrap();
-        assert_eq!(partial_decoded, (0, 1));
+        assert_eq!(partial_decoded, (0, ALIGNMENT));
     }
 
     #[test]
@@ -389,7 +366,7 @@ mod tests {
             <u8 as Encoder<LittleEndian, { ALIGNMENT }, false>>::partial_decode(&encoded, 0)
                 .unwrap();
 
-        assert_eq!(partial_decoded, (0, 1));
+        assert_eq!(partial_decoded, (0, 32));
     }
 
     #[test]

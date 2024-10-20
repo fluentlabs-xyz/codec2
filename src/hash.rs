@@ -19,17 +19,16 @@ where
     const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_header_el_size = align_up::<ALIGN>(4);
         let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
 
         // Ensure buf is large enough for the header
-        if buf.len() < aligned_offset + aligned_header_size {
-            buf.resize(aligned_offset + aligned_header_size, 0);
+        if buf.len() < offset + aligned_header_size {
+            buf.resize(offset + aligned_header_size, 0);
         }
 
         // Write map size
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, self.len() as u32);
+        write_u32_aligned::<B, ALIGN>(buf, offset, self.len() as u32);
 
         // Make sure keys & values are sorted
         let mut entries: Vec<_> = self.iter().collect();
@@ -46,7 +45,7 @@ where
         // write keys header and keys data
         write_bytes::<B, ALIGN, false>(
             buf,
-            aligned_offset + aligned_header_el_size,
+            offset + aligned_header_el_size,
             &key_buf,
             entries.len() as u32,
         );
@@ -58,33 +57,30 @@ where
             value.encode(&mut value_buf, value_offset)?;
         }
 
-        write_bytes_wasm::<B, ALIGN>(buf, aligned_offset + aligned_header_el_size * 3, &value_buf);
+        write_bytes_wasm::<B, ALIGN>(buf, offset + aligned_header_el_size * 3, &value_buf);
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<{ ALIGN }>(offset);
         let aligned_header_el_size = align_up::<ALIGN>(4);
         let aligned_header_size = align_up::<{ ALIGN }>(Self::HEADER_SIZE);
 
-        if buf.remaining() < aligned_offset + aligned_header_size {
+        if buf.remaining() < offset + aligned_header_size {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_header_size,
+                expected: offset + aligned_header_size,
                 found: buf.remaining(),
                 msg: "Not enough data to decode HashMap header".to_string(),
             }));
         }
 
-        let length = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
+        let length = read_u32_aligned::<B, { ALIGN }>(buf, offset)? as usize;
 
         let (keys_offset, keys_length) =
-            read_bytes_header::<B, { ALIGN }, false>(buf, aligned_offset + aligned_header_el_size)?;
+            read_bytes_header::<B, { ALIGN }, false>(buf, offset + aligned_header_el_size)?;
 
-        let (values_offset, values_length) = read_bytes_header::<B, { ALIGN }, false>(
-            buf,
-            aligned_offset + aligned_header_el_size * 3,
-        )?;
+        let (values_offset, values_length) =
+            read_bytes_header::<B, { ALIGN }, false>(buf, offset + aligned_header_el_size * 3)?;
 
         let key_bytes = &buf.chunk()[keys_offset..keys_offset + keys_length];
         let value_bytes = &buf.chunk()[values_offset..values_offset + values_length];
@@ -113,21 +109,20 @@ where
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
 
-        if buf.remaining() < aligned_offset + aligned_header_size {
+        if buf.remaining() < offset + aligned_header_size {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_header_size,
+                expected: offset + aligned_header_size,
                 found: buf.remaining(),
                 msg: "Not enough data to decode HashMap header".to_string(),
             }));
         }
 
         let (keys_offset, keys_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))?;
+            read_bytes_header::<B, ALIGN, false>(buf, offset + align_up::<ALIGN>(4))?;
         let (_values_offset, values_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(12))?;
+            read_bytes_header::<B, ALIGN, false>(buf, offset + align_up::<ALIGN>(12))?;
 
         Ok((keys_offset, keys_length + values_length))
     }
@@ -143,18 +138,16 @@ where
     const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
         // Ensure buf is large enough for the header
-        if buf.len() < aligned_offset + Self::HEADER_SIZE {
-            buf.resize(aligned_offset + Self::HEADER_SIZE, 0);
+        if buf.len() < offset + Self::HEADER_SIZE {
+            buf.resize(offset + Self::HEADER_SIZE, 0);
         }
 
         // Write offset size
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, (32) as u32);
+        write_u32_aligned::<B, ALIGN>(buf, offset, (32) as u32);
 
         // Write map size
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 32, self.len() as u32);
+        write_u32_aligned::<B, ALIGN>(buf, offset + 32, self.len() as u32);
 
         // Make sure keys & values are sorted
         let mut entries: Vec<_> = self.iter().collect();
@@ -167,16 +160,16 @@ where
             let key_offset = align_up::<ALIGN>(K::HEADER_SIZE) * i;
             key.encode(&mut key_buf, key_offset)?;
         }
-        let relative_key_offset = buf.len() - aligned_offset - 64;
+        let relative_key_offset = buf.len() - offset - 64;
         // Write key offset
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 64, relative_key_offset as u32);
+        write_u32_aligned::<B, ALIGN>(buf, offset + 64, relative_key_offset as u32);
 
         // write key header and keys data to the buf
-        write_bytes_solidity::<B, ALIGN>(buf, aligned_offset + 64, &key_buf, entries.len() as u32);
+        write_bytes_solidity::<B, ALIGN>(buf, offset + 64, &key_buf, entries.len() as u32);
 
         // Write values offset
-        let relative_value_offset = buf.len() - aligned_offset - 96;
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset + 96, relative_value_offset as u32);
+        let relative_value_offset = buf.len() - offset - 96;
+        write_u32_aligned::<B, ALIGN>(buf, offset + 96, relative_value_offset as u32);
 
         // Encode and write values
         let mut value_buf = BytesMut::zeroed(align_up::<ALIGN>(V::HEADER_SIZE) * self.len());
@@ -195,10 +188,8 @@ where
         const KEYS_OFFSET: usize = 32;
         const VALUES_OFFSET: usize = 64;
 
-        let aligned_offset = align_up::<{ ALIGN }>(offset);
-
         // Check if there's enough data to read the header
-        let header_end = aligned_offset
+        let header_end = offset
             .checked_add(Self::HEADER_SIZE)
             .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
@@ -214,10 +205,10 @@ where
         }
 
         // Read data offset
-        let data_offset = read_u32_aligned::<B, { ALIGN }>(buf, aligned_offset)? as usize;
+        let data_offset = read_u32_aligned::<B, { ALIGN }>(buf, offset)? as usize;
 
         // Calculate start offset
-        let start_offset = aligned_offset
+        let start_offset = offset
             .checked_add(data_offset)
             .ok_or_else(|| CodecError::Decoding(DecodingError::Overflow))?;
 
@@ -266,21 +257,20 @@ where
     }
 
     fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_header_size = align_up::<ALIGN>(Self::HEADER_SIZE);
 
-        if buf.remaining() < aligned_offset + aligned_header_size {
+        if buf.remaining() < offset + aligned_header_size {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_header_size,
+                expected: offset + aligned_header_size,
                 found: buf.remaining(),
                 msg: "Not enough data to decode HashMap header".to_string(),
             }));
         }
 
         let (keys_offset, keys_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(4))?;
+            read_bytes_header::<B, ALIGN, false>(buf, offset + align_up::<ALIGN>(4))?;
         let (_values_offset, values_length) =
-            read_bytes_header::<B, ALIGN, false>(buf, aligned_offset + align_up::<ALIGN>(12))?;
+            read_bytes_header::<B, ALIGN, false>(buf, offset + align_up::<ALIGN>(12))?;
 
         Ok((keys_offset, keys_length + values_length))
     }

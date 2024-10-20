@@ -32,26 +32,25 @@ where
     const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_elem_size = align_up::<ALIGN>(4);
         let aligned_header_size = aligned_elem_size * 3;
 
         // Ensure buffer can store header
-        if buf.len() < aligned_offset + aligned_header_size {
-            buf.resize(aligned_offset + aligned_header_size, 0);
+        if buf.len() < offset + aligned_header_size {
+            buf.resize(offset + aligned_header_size, 0);
         }
 
         // Write length of the vector
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, self.len() as u32);
+        write_u32_aligned::<B, ALIGN>(buf, offset, self.len() as u32);
 
         if self.is_empty() {
             // Write offset and size for empty vector
             write_u32_aligned::<B, ALIGN>(
                 buf,
-                aligned_offset + aligned_elem_size,
+                offset + aligned_elem_size,
                 aligned_header_size as u32,
             );
-            write_u32_aligned::<B, ALIGN>(buf, aligned_offset + aligned_elem_size * 2, 0);
+            write_u32_aligned::<B, ALIGN>(buf, offset + aligned_elem_size * 2, 0);
             return Ok(());
         }
 
@@ -63,30 +62,29 @@ where
         }
 
         let data = value_encoder.freeze();
-        write_bytes_wasm::<B, ALIGN>(buf, aligned_offset + aligned_elem_size, &data);
+        write_bytes_wasm::<B, ALIGN>(buf, offset + aligned_elem_size, &data);
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
         let aligned_header_el_size = align_up::<ALIGN>(4);
 
-        if buf.remaining() < aligned_offset + aligned_header_el_size {
+        if buf.remaining() < offset + aligned_header_el_size {
             return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
-                expected: aligned_offset + aligned_header_el_size,
+                expected: offset + aligned_header_el_size,
                 found: buf.remaining(),
                 msg: "failed to decode vector length".to_string(),
             }));
         }
 
-        let data_len = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)? as usize;
+        let data_len = read_u32_aligned::<B, ALIGN>(buf, offset)? as usize;
         if data_len == 0 {
             return Ok(Vec::new());
         }
 
         let mut result = Vec::with_capacity(data_len);
-        let data = read_bytes::<B, ALIGN, false>(buf, aligned_offset + aligned_header_el_size)?;
+        let data = read_bytes::<B, ALIGN, false>(buf, offset + aligned_header_el_size)?;
 
         for i in 0..data_len {
             let elem_offset = i * align_up::<ALIGN>(T::HEADER_SIZE);
@@ -111,15 +109,13 @@ where
     const IS_DYNAMIC: bool = true;
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-
         // Ensure buffer can store header
-        if buf.len() < aligned_offset + Self::HEADER_SIZE {
-            buf.resize(aligned_offset + Self::HEADER_SIZE, 0);
+        if buf.len() < offset + Self::HEADER_SIZE {
+            buf.resize(offset + Self::HEADER_SIZE, 0);
         }
 
         // Write offset
-        write_u32_aligned::<B, ALIGN>(buf, aligned_offset, buf.len() as u32);
+        write_u32_aligned::<B, ALIGN>(buf, offset, buf.len() as u32);
 
         if self.is_empty() {
             // Write length for empty vector
@@ -135,19 +131,13 @@ where
         }
 
         let data = value_encoder.freeze();
-        write_bytes_solidity::<B, ALIGN>(
-            buf,
-            aligned_offset + Self::HEADER_SIZE,
-            &data,
-            self.len() as u32,
-        );
+        write_bytes_solidity::<B, ALIGN>(buf, offset + Self::HEADER_SIZE, &data, self.len() as u32);
 
         Ok(())
     }
 
     fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
-        let aligned_offset = align_up::<ALIGN>(offset);
-        let data_offset = read_u32_aligned::<B, ALIGN>(buf, aligned_offset)?;
+        let data_offset = read_u32_aligned::<B, ALIGN>(buf, offset)?;
         let data_len = read_u32_aligned::<B, ALIGN>(buf, data_offset as usize)? as usize;
 
         if data_len == 0 {
