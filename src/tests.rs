@@ -21,7 +21,6 @@ use alloy_sol_types::{
 use byteorder::{ByteOrder, BE, LE};
 use bytes::{Buf, BytesMut};
 use codec_derive::Codec;
-use core::str;
 use hashbrown::HashMap;
 use hex_literal::hex;
 
@@ -107,8 +106,8 @@ fn test_tuple_bytes_address_sol() {
 
     let encoded_sol = tuple.abi_encode();
 
-    println!("Encoded data sol: 0x{}", hex::encode(&encoded_sol));
-
+    // println!("Encoded data sol: 0x{}", hex::encode(&encoded_sol));
+    print_bytes::<BE, 32>(&encoded_sol);
     let decoded_sol = TupleType::abi_decode(&encoded_sol, false).unwrap();
 
     assert_eq!(tuple, decoded_sol);
@@ -435,6 +434,26 @@ fn test_bytes_sol() {
     assert_eq!(decoded, original);
 }
 
+#[test]
+fn test_tuple_wasm() {
+    let b = Bytes::from("Hello, World!!".as_bytes());
+    let a = Address::repeat_byte(0xAA);
+
+    let t = (b, a);
+
+    let mut buf = BytesMut::new();
+    FluentABI::encode(&t, &mut buf, 0).unwrap();
+    let encoded = buf.freeze();
+
+    // println!("encoded: {:?}", hex::encode(&encoded));
+    let expected_encoded = "040000001c0000000e000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa48656c6c6f2c20576f726c6421210000";
+
+    assert_eq!(hex::encode(&encoded), expected_encoded);
+    println!("Decoding...");
+    let decoded = FluentABI::<(Bytes, Address)>::decode(&encoded, 0).unwrap();
+
+    assert_eq!(decoded, t);
+}
 #[test]
 fn test_fixed_bytes_sol() {
     // Use FixedBytes<11> to match the length of "hello world"

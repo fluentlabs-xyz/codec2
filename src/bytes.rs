@@ -116,6 +116,7 @@ pub fn read_bytes<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool>(
     } else {
         buf.chunk()[data_offset..data_offset + data_len].to_vec()
     };
+
     Ok(Bytes::from(data))
 }
 

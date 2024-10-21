@@ -1,7 +1,7 @@
 use crate::{
     alloc::string::ToString,
     encoder::{align_up, read_u32_aligned, write_u32_aligned, Encoder},
-    error::CodecError,
+    error::{CodecError, DecodingError},
 };
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
@@ -16,11 +16,20 @@ where
 
     fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
         let mut current_offset = offset;
+        let header_el_size = if SOL_MODE {
+            align_up::<ALIGN>(32)
+        } else {
+            align_up::<ALIGN>(4)
+        };
         if Self::IS_DYNAMIC {
             let buf_len = buf.len();
-            let dynamic_offset = if buf_len == 0 { 32 } else { buf_len };
+            let dynamic_offset = if buf_len == 0 {
+                header_el_size
+            } else {
+                buf_len
+            };
             write_u32_aligned::<B, ALIGN>(buf, current_offset, dynamic_offset as u32);
-            current_offset += 32;
+            current_offset += header_el_size;
 
             let aligned_header_size = align_up::<ALIGN>(T::HEADER_SIZE);
             if buf_len < current_offset + aligned_header_size {
@@ -53,11 +62,18 @@ where
     }
 }
 
+const WORD_SIZE: usize = 32;
+const U32_SIZE: usize = 4;
+
+const fn is_power_of_two(n: usize) -> bool {
+    n != 0 && (n & (n - 1)) == 0
+}
+
 macro_rules! impl_encoder_for_tuple {
-    ($($T:ident),+; $($idx:tt),+) => {
-        impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool, $($T,)+> Encoder<B, {ALIGN}, {SOL_MODE}> for ($($T,)+)
+    ($($T:ident),+; $($idx:tt),+; $is_solidity:expr) => {
+        impl<B: ByteOrder, const ALIGN: usize, $($T,)+> Encoder<B, {ALIGN}, $is_solidity> for ($($T,)+)
         where
-            $($T: Encoder<B, {ALIGN}, {SOL_MODE}>,)+
+            $($T: Encoder<B, {ALIGN}, $is_solidity>,)+
         {
             const HEADER_SIZE: usize = {
                 let mut size = 0;
@@ -77,13 +93,21 @@ macro_rules! impl_encoder_for_tuple {
             };
 
             fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+                assert!(is_power_of_two(ALIGN), "ALIGN must be a power of two");
+
                 let mut current_offset = offset;
 
                 if Self::IS_DYNAMIC {
                     let buf_len = buf.len();
-                    let dynamic_offset = if buf_len == 0 { 32 } else { buf_len };
+
+                    let dynamic_offset = if buf_len == 0 {
+                        if $is_solidity { WORD_SIZE } else { U32_SIZE }
+                    } else {
+                        buf_len
+                    };
                     write_u32_aligned::<B, ALIGN>(buf, current_offset, dynamic_offset as u32);
-                    current_offset += 32;
+                    current_offset += if $is_solidity { WORD_SIZE } else { U32_SIZE };
+
 
                     let aligned_header_size = {
                         let mut size = 0;
@@ -99,18 +123,18 @@ macro_rules! impl_encoder_for_tuple {
                         buf.resize(current_offset + aligned_header_size, 0);
                     }
 
+
                     let mut tmp = buf.split_off(current_offset);
                     current_offset = 0;
-
                     $(
-                        self.$idx.encode(&mut tmp, current_offset)?;
-                        if $T::IS_DYNAMIC {
-                            current_offset += 32;
-                        } else {
-                            current_offset += align_up::<ALIGN>($T::HEADER_SIZE);
-                        }
-                    )+
 
+                        self.$idx.encode(&mut tmp, current_offset)?;
+                        current_offset += if $T::IS_DYNAMIC && $is_solidity {
+                           WORD_SIZE
+                        } else {
+                            align_up::<ALIGN>($T::HEADER_SIZE)
+                        };
+                    )+
                     buf.unsplit(tmp);
                 } else {
                     $(
@@ -123,9 +147,24 @@ macro_rules! impl_encoder_for_tuple {
             }
 
             fn decode(buf: &impl Buf, offset: usize) -> Result<Self, CodecError> {
+                if buf.remaining() < offset {
+                    return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                        expected: offset,
+                        found: buf.remaining(),
+                        msg: "buf too small to take offset".to_string(),
+                    }));
+                }
+
                 let tmp = if Self::IS_DYNAMIC {
-                    let offset = read_u32_aligned::<B, ALIGN>(&buf.chunk(), offset)? as usize;
-                    &buf.chunk()[offset..]
+                    let dynamic_offset = read_u32_aligned::<B, ALIGN>(&buf.chunk(), offset)? as usize;
+                    if buf.remaining() < dynamic_offset {
+                       return Err(CodecError::Decoding(DecodingError::BufferTooSmall {
+                            expected: dynamic_offset,
+                            found: buf.remaining(),
+                            msg: "buf too small to take dynamic offset".to_string(),
+                        }));
+                    }
+                    &buf.chunk()[dynamic_offset..]
                 } else {
                     &buf.chunk()[offset..]
                 };
@@ -135,8 +174,8 @@ macro_rules! impl_encoder_for_tuple {
                 Ok(($(
                     {
                         let value = $T::decode(&tmp, current_offset)?;
-                        current_offset += if $T::IS_DYNAMIC {
-                            32
+                        current_offset += if $T::IS_DYNAMIC && $is_solidity{
+                            WORD_SIZE
                         } else {
                             align_up::<ALIGN>($T::HEADER_SIZE)
                         };
@@ -146,19 +185,27 @@ macro_rules! impl_encoder_for_tuple {
             }
 
             fn partial_decode(buf: &impl Buf, offset: usize) -> Result<(usize, usize), CodecError> {
-                Ok((0, 0))
+               Ok((0,0))
             }
+
         }
     };
 }
 
-impl_encoder_for_tuple!(T1, T2; 0, 1);
-impl_encoder_for_tuple!(T1, T2, T3; 0, 1, 2);
-impl_encoder_for_tuple!(T1, T2, T3, T4; 0, 1, 2, 3);
-impl_encoder_for_tuple!(T1, T2, T3, T4, T5; 0, 1, 2, 3, 4);
-impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5);
-impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6);
-impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7, T8; 0, 1, 2, 3, 4, 5, 6, 7);
+impl_encoder_for_tuple!(T1, T2; 0, 1; true);
+impl_encoder_for_tuple!(T1, T2; 0, 1; false);
+impl_encoder_for_tuple!(T1, T2, T3; 0, 1, 2; true);
+impl_encoder_for_tuple!(T1, T2, T3; 0, 1, 2; false);
+impl_encoder_for_tuple!(T1, T2, T3, T4; 0, 1, 2, 3; true);
+impl_encoder_for_tuple!(T1, T2, T3, T4; 0, 1, 2, 3; false);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5; 0, 1, 2, 3, 4; true);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5; 0, 1, 2, 3, 4; false);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5; true);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5; false);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6; true);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6; false);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7, T8; 0, 1, 2, 3, 4, 5, 6, 7; true);
+impl_encoder_for_tuple!(T1, T2, T3, T4, T5, T6, T7, T8; 0, 1, 2, 3, 4, 5, 6, 7; false);
 
 #[cfg(test)]
 mod tests {
