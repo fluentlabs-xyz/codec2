@@ -5,6 +5,24 @@ use crate::{
 };
 use byteorder::ByteOrder;
 use bytes::{Buf, BytesMut};
+impl<B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, { ALIGN }, { SOL_MODE }>
+    for ()
+{
+    const HEADER_SIZE: usize = 0;
+    const IS_DYNAMIC: bool = false;
+
+    fn encode(&self, _buf: &mut BytesMut, _offset: usize) -> Result<(), CodecError> {
+        Ok(())
+    }
+
+    fn decode(_buf: &impl Buf, _offset: usize) -> Result<Self, CodecError> {
+        Ok(())
+    }
+
+    fn partial_decode(_buf: &impl Buf, _offset: usize) -> Result<(usize, usize), CodecError> {
+        Ok((0, 0))
+    }
+}
 
 impl<T, B: ByteOrder, const ALIGN: usize, const SOL_MODE: bool> Encoder<B, { ALIGN }, { SOL_MODE }>
     for (T,)
@@ -212,6 +230,18 @@ mod tests {
     use super::*;
     use byteorder::LittleEndian;
     use bytes::BytesMut;
+
+    #[test]
+    fn test_empty_tuple() {
+        let t = ();
+        let mut buf = BytesMut::new();
+
+        <() as Encoder<LittleEndian, 4, false>>::encode(&t, &mut buf, 0).unwrap();
+        let encoded = buf.freeze();
+        assert_eq!(hex::encode(&encoded), "");
+        let decoded = <() as Encoder<LittleEndian, 4, false>>::decode(&encoded, 0).unwrap();
+        assert_eq!(decoded, ());
+    }
 
     #[test]
     fn test_single_element_tuple() {
