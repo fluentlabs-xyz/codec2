@@ -1,0 +1,16 @@
+[package]
+name = "no-std"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+codec2 = { path = "../..", default-features = false }
+bytes = { version = "1.8.0", default-features = false }
+wee_alloc = "0.4.5"
+fluentbase-sdk = { path = "../../../fluentbase/crates/sdk", default-features = false}
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+default = []
