@@ -52,17 +52,23 @@ impl CodecStruct {
         let struct_name = &self.struct_name;
         let (_impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
 
+        let crate_name = if std::env::var("CARGO_PKG_NAME").unwrap() == "codec2" {
+            quote! { crate }
+        } else {
+            quote! { ::codec2 }
+        };
+        
         let header_sizes = self.fields.iter().map(|field| {
             let ty = &field.ty;
             quote! {
-                <#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE
+                <#ty as #crate_name::Encoder<B, ALIGN, {true}>>::HEADER_SIZE
             }
         });
 
         let is_dynamic_expr = self.fields.iter().map(|field| {
             let ty = &field.ty;
             quote! {
-                <#ty as Encoder<B, ALIGN, {true}>>::IS_DYNAMIC
+                <#ty as #crate_name::Encoder<B, ALIGN, {true}>>::IS_DYNAMIC
             }
         });
 
@@ -74,12 +80,12 @@ impl CodecStruct {
             let ident = &field.ident;
             let ty = &field.ty;
             quote! {
-                if <#ty as Encoder<B, ALIGN, {true}>>::IS_DYNAMIC {
-                    <#ty as Encoder<B, ALIGN, {true}>>::encode(&self.#ident, &mut tmp, current_offset)?;
+                if <#ty as #crate_name::Encoder<B, ALIGN, {true}>>::IS_DYNAMIC {
+                    <#ty as #crate_name::Encoder<B, ALIGN, {true}>>::encode(&self.#ident, &mut tmp, current_offset)?;
                     current_offset += align_up::<ALIGN>(4);
                 } else {
-                    <#ty as Encoder<B, ALIGN, {true}>>::encode(&self.#ident, &mut tmp, current_offset)?;
-                    current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE);
+                    <#ty as #crate_name::Encoder<B, ALIGN, {true}>>::encode(&self.#ident, &mut tmp, current_offset)?;
+                    current_offset += align_up::<ALIGN>(<#ty as #crate_name::Encoder<B, ALIGN, {true}>>::HEADER_SIZE);
                 }
             }
         });
@@ -88,12 +94,12 @@ impl CodecStruct {
             let ident = &field.ident;
             let ty = &field.ty;
             quote! {
-                let #ident = <#ty as Encoder<B, ALIGN, {true}>>::decode(&mut tmp, current_offset)?;
+                let #ident = <#ty as #crate_name::Encoder<B, ALIGN, {true}>>::decode(&mut tmp, current_offset)?;
 
-                current_offset += if <#ty as Encoder<B, ALIGN, {true}>>::IS_DYNAMIC {
+                current_offset += if <#ty as #crate_name::Encoder<B, ALIGN, {true}>>::IS_DYNAMIC {
                     32
                 } else {
-                    align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE)
+                    align_up::<ALIGN>(<#ty as #crate_name::Encoder<B, ALIGN, {true}>>::HEADER_SIZE)
                 };
             }
         });
@@ -101,13 +107,13 @@ impl CodecStruct {
         let aligned_header_size = self.fields.iter().map(|field| {
             let ty = &field.ty;
             let ts = quote! {
-                <#ty as Encoder<B, ALIGN, {true}>>
+                <#ty as #crate_name::Encoder<B, ALIGN, {true}>>
             };
             quote! {
                 if #ts ::IS_DYNAMIC {
                     32
                 } else {
-                    align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {true}>>::HEADER_SIZE)
+                    align_up::<ALIGN>(<#ty as #crate_name::Encoder<B, ALIGN, {true}>>::HEADER_SIZE)
                 }
             }
         });
@@ -124,14 +130,14 @@ impl CodecStruct {
         });
 
         quote! {
-            impl<B: ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, {true}> for #struct_name #ty_generics #where_clause {
+            impl<B: ByteOrder, const ALIGN: usize> #crate_name::Encoder<B, ALIGN, {true}> for #struct_name #ty_generics #where_clause {
                 const HEADER_SIZE: usize = 0 #( + #header_sizes)*;
                 const IS_DYNAMIC: bool = #is_dynamic;
 
-                fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
+                fn encode(&self, buf: &mut ::bytes::BytesMut, offset: usize) -> Result<(), CodecError> {
 
                     let aligned_offset = align_up::<ALIGN>(offset);
-                    let is_dynamic = <Self as Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
+                    let is_dynamic = <Self as #crate_name::Encoder<B, ALIGN, { true }>>::IS_DYNAMIC;
                     let aligned_header_size = #aligned_header_size;
                     let mut dynamic_fields_count = 0;
 
@@ -188,17 +194,23 @@ impl CodecStruct {
         let struct_name = &self.struct_name;
         let (_impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
 
+        let crate_name = if std::env::var("CARGO_PKG_NAME").unwrap() == "codec2" {
+            quote! { crate }
+        } else {
+            quote! { ::codec2 }
+        };
+
         let header_sizes = self.fields.iter().map(|field| {
             let ty = &field.ty;
             quote! {
-                align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {false}>>::HEADER_SIZE)
+                align_up::<ALIGN>(<#ty as #crate_name::Encoder<B, ALIGN, {false}>>::HEADER_SIZE)
             }
         });
 
         let is_dynamic_expr = self.fields.iter().map(|field| {
             let ty = &field.ty;
             quote! {
-                <#ty as Encoder<B, ALIGN, {false}>>::IS_DYNAMIC
+                <#ty as #crate_name::Encoder<B, ALIGN, {false}>>::IS_DYNAMIC
             }
         });
 
@@ -210,8 +222,8 @@ impl CodecStruct {
             let ident = &field.ident;
             let ty = &field.ty;
             quote! {
-                <#ty as Encoder<B, ALIGN, {false}>>::encode(&self.#ident, buf, current_offset)?;
-                current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {false}>>::HEADER_SIZE);
+                <#ty as #crate_name::Encoder<B, ALIGN, {false}>>::encode(&self.#ident, buf, current_offset)?;
+                current_offset += align_up::<ALIGN>(<#ty as #crate_name::Encoder<B, ALIGN, {false}>>::HEADER_SIZE);
             }
         });
 
@@ -219,9 +231,9 @@ impl CodecStruct {
             let ident = &field.ident;
             let ty = &field.ty;
             quote! {
-                let #ident = <#ty as Encoder<B, ALIGN, {false}>>::decode(buf, current_offset)?;
+                let #ident = <#ty as #crate_name::Encoder<B, ALIGN, {false}>>::decode(buf, current_offset)?;
 
-                current_offset += align_up::<ALIGN>(<#ty as Encoder<B, ALIGN, {false}>>::HEADER_SIZE);
+                current_offset += align_up::<ALIGN>(<#ty as #crate_name::Encoder<B, ALIGN, {false}>>::HEADER_SIZE);
             }
         });
 
@@ -233,13 +245,13 @@ impl CodecStruct {
         });
 
         quote! {
-            impl<B:ByteOrder, const ALIGN: usize> Encoder<B, ALIGN, {false}> for #struct_name #ty_generics #where_clause {
+            impl<B:ByteOrder, const ALIGN: usize> #crate_name::Encoder<B, ALIGN, {false}> for #struct_name #ty_generics #where_clause {
                 const HEADER_SIZE: usize = 0 #( + #header_sizes)*;
                 const IS_DYNAMIC: bool = #is_dynamic;
 
                 fn encode(&self, buf: &mut BytesMut, offset: usize) -> Result<(), CodecError> {
                     let mut current_offset = align_up::<ALIGN>(offset);
-                    let header_size = <Self as Encoder<B, ALIGN, { false }>>::HEADER_SIZE;
+                    let header_size = <Self as #crate_name::Encoder<B, ALIGN, { false }>>::HEADER_SIZE;
 
                     if buf.len() < current_offset + header_size {
                         buf.resize(current_offset + header_size, 0);
